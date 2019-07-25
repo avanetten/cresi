@@ -440,26 +440,6 @@ def get_edge_geo_coords(G, im_file, remove_pix_geom=True,
         
     return G
 
-################################################################################
-#def get_xy_geo_coords(xs_pix, ys_pix, im_file):
-#    
-#    dict_list = []
-#    for (x_pix,y_pix) in zip(xs_pix,ys_pix):
-#        attr_dict = {}
-#        lon, lat = pixelToGeoCoord(x_pix, y_pix, im_file)
-#        [utm_east, utm_north, utm_zone, utm_letter] =\
-#                    utm.from_latlon(lat, lon)
-#        attr_dict['lon'] = lon
-#        attr_dict['lat'] = lat
-#        attr_dict['utm_east'] = utm_east
-#        attr_dict['utm_zone'] = utm_zone
-#        attr_dict['utm_letter'] = utm_letter
-#        attr_dict['utm_north'] = utm_north        
-#        attr_dict['x'] = lon
-#        attr_dict['y'] = lat
-#        #print " ", n, attr_dict
-#    return dict_list
-
 
 ###############################################################################
 def wkt_to_G(wkt_list, im_file=None, min_subgraph_length_pix=30, 
@@ -624,12 +604,6 @@ def wkt_to_G(wkt_list, im_file=None, min_subgraph_length_pix=30,
     
     return Gout
 
-################################################################################
-#def csv_to_wkt_list(df_wkt, im_root):
-#    '''Return wkt_list for all rows in df corresponding to im_root'''
-#    
-#    df_filt = df_wkt[df_wkt['ImageId'] == im_root]
-    
 
 def main():
     
@@ -645,17 +619,7 @@ def main():
     
     # local
     if local:
-        albu_path = '/Users/avanetten/Documents/cosmiq/apls/albu_inference_mod'
-        path_images = '/Users/avanetten/Documents/cosmiq/spacenet/data/spacenetv2/AOI_2_Vegas_Test/400m/RGB-PanSharpen'
-        res_root_dir = os.path.join(albu_path, 'results/2m_4fold_512_30e_d0.2_g0.2_AOI_2_Vegas_Test')
-        csv_file = os.path.join(res_root_dir, 'wkt_submission.csv')
-        graph_dir = os.path.join(res_root_dir, 'graphs')
-        log_file = os.path.join(res_root_dir, 'wkt_to_G.log')
-        #os.makedirs(graph_dir, exist_ok=True)
-        try:
-            os.makedirs(graph_dir)
-        except:
-            pass
+        pass
     
     # deployed on dev box
     else:
@@ -677,36 +641,6 @@ def main():
 
 
     console, logger1 = make_logger.make_logger(log_file, logger_name='log')
-#    ###############################################################################
-#    # https://docs.python.org/3/howto/logging-cookbook.html#logging-to-multiple-destinations
-#    # set up logging to file - see previous section for more details
-#    logging.basicConfig(level=logging.DEBUG,
-#                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-#                        datefmt='%m-%d %H:%M',
-#                        filename=log_file,
-#                        filemode='w')
-#    # define a Handler which writes INFO messages or higher to the sys.stderr
-#    console = logging.StreamHandler()
-#    console.setLevel(logging.INFO)
-#    # set a format which is simpler for console use
-#    formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    #formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    # tell the handler to use this format
-#    console.setFormatter(formatter)
-#    # add the handler to the root logger
-#    logging.getLogger('').addHandler(console)
-#    logger1 = logging.getLogger('log')
-#    logger1.info("log file: {x}".format(x=log_file))
-#    ###############################################################################  
- 
-    
-#    csv_file = os.path.join(res_root_dir, 'merged_wkt_list.csv')
-#    graph_dir = os.path.join(res_root_dir, 'graphs')
-#    #os.makedirs(graph_dir, exist_ok=True)
-#    try:
-#        os.makedirs(graph_dir)
-#    except:
-#        pass
 
     # read in wkt list
     logger1.info("df_wkt at: {}".format(csv_file))
@@ -800,89 +734,7 @@ def main():
         
     tf = time.time()
     logger1.info("Time to run wkt_to_G.py: {} seconds".format(tf - t0))
-    #print ("Time to run wkt_to_G.py:", tf - t0, "seconds")
-
-#    # test...
-#
-#
-#    im_dir = '/Users/avanetten/Documents/cosmiq/spacenet/data/spacenetv2/AOI_2_Vegas_Test/400m/RGB-PanSharpen'
-#    im_root = 'RGB-PanSharpen_AOI_2_Vegas_img1005.tif'
-#    im_file = os.path.join(im_dir, im_root)
-#    #im = cv2.imread(im_file, 3)
-#    
-#    # AOI_2_Vegas_img1005
-#    wkt_list = ["LINESTRING (648.0 2.0, 651.0 192.0)",
-#    "LINESTRING (1252.0 2.0, 1252.0 162.0, 1261.0 375.0, 1264.0 586.0)",
-#    "LINESTRING (651.0 192.0, 293.0 195.0)",
-#    "LINESTRING (651.0 192.0, 661.0 316.0)",
-#    "LINESTRING (685.0 301.0, 683.0 329.0, 691.0 456.0, 692.0 593.0)",
-#    "LINESTRING (632.0 312.0, 630.0 444.0, 633.0 593.0)",
-#    "LINESTRING (1264.0 586.0, 1200.0 592.0)",
-#    "LINESTRING (1264.0 586.0, 1296.0 588.0)",
-#    "LINESTRING (1200.0 592.0, 1138.0 589.0, 692.0 593.0)",
-#    "LINESTRING (633.0 593.0, 692.0 593.0)",
-#    "LINESTRING (692.0 593.0, 688.0 774.0, 683.0 858.0, 678.0 885.0, 653.0 915.0)",
-#    "LINESTRING (1200.0 592.0, 1203.0 753.0)",
-#    "LINESTRING (633.0 593.0, 629.0 598.0, 539.0 604.0, 417.0 621.0, 255.0 637.0, 2.0 654.0)",
-#    "LINESTRING (629.0 598.0, 628.0 889.0, 624.0 902.0)",
-#    "LINESTRING (1203.0 753.0, 934.0 756.0, 912.0 759.0, 892.0 770.0, 887.0 782.0, 885.0 807.0, 876.0 1219.0)",
-#    "LINESTRING (1203.0 753.0, 1210.0 840.0, 1216.0 1111.0, 1215.0 1199.0, 1210.0 1216.0, 1198.0 1223.0, 1162.0 1228.0, 1006.0 1229.0, 932.0 1227.0, 876.0 1219.0)",
-#    "LINESTRING (2.0 814.0, 160.0 806.0, 314.0 795.0, 392.0 792.0, 421.0 794.0, 428.0 799.0, 435.0 822.0, 440.0 899.0, 447.0 908.0)",
-#    "LINESTRING (624.0 902.0, 618.0 896.0, 609.0 894.0, 494.0 894.0, 469.0 898.0, 458.0 908.0)",
-#    "LINESTRING (624.0 902.0, 626.0 912.0)",
-#    "LINESTRING (447.0 908.0, 458.0 908.0)",
-#    "LINESTRING (447.0 908.0, 439.0 924.0, 432.0 1126.0, 429.0 1139.0, 422.0 1148.0, 395.0 1153.0, 2.0 1161.0)",
-#    "LINESTRING (458.0 908.0, 468.0 918.0, 500.0 922.0, 594.0 924.0, 614.0 922.0, 626.0 912.0, 653.0 915.0, 659.0 923.0, 654.0 1168.0, 656.0 1224.0)",
-#    "LINESTRING (876.0 1219.0, 656.0 1224.0, 653.0 1296.0)"] 
-#
-#    
-#    # Execute
-#    G = wkt_to_G(wkt_list, im_file=im_file, verbose=False)
-#    
-##    node_loc_dic, edge_dic = wkt_list_to_nodes_edges(wkt_list)
-##    G3 = nodes_edges_to_G(node_loc_dic, edge_dic)    
-##    G4 = get_node_geo_coords(G3, im_file)
-##    G4 = get_edge_geo_coords(G4, im_file)
-##    G4.edge[19][22]
-##    G_projected = ox.project_graph(G4)
-##    ox.plot_graph(G_projected)
-#  
-#    
-#    # check ox downloads
-#    G = ox.graph_from_bbox(37.79, 37.78, -122.41, -122.43, network_type='drive')
-#    G.nodes()    
-#    G.node[65327144]
-#    G_projected = ox.project_graph(G)
-#    G.node[65327144]
-#    G.edges()
-#    G.edge[65327144][65352337]
-#    a = G.edge[65327144][65352337][0]['geometry']
-#    
-#     
-#    
-#    ## https://bitbucket.org/gallipoli/nx_spatial/src
-#    #import nx_spatial as ns   
-#    #z = shapely.wkt.loads(wkt_list[1])
-#    #shp_file = '/Users/avanetten/Documents/cosmiq/apls/albu_inference_mod/results/my_shp2.shp'
-#    
 #     #wkt_to_shp(wkt_list, shp_file)
-#    #G2 = ns.read_shp(shp_file) 
-#    #nx.draw(G2)
-#    ##ox.plot_graph(G2)
-#    #
-#    #G = shp_to_G(shp_file)
-#    #nx.draw(G)
-#    ##ox.plot_graph(G)
-#    #
-#    #    
-#    #
-#    #s = wkt_list[0]
-#    #
-#    ## Convert to a shapely.geometry.polygon.Polygon object
-#    #g1 = shapely.wkt.loads(s)
-#    #
-#    #g2 = geojson.Feature(geometry=g1, properties={})
-           
     
 ###############################################################################
 if __name__ == "__main__":
