@@ -2,7 +2,7 @@
 
 ## City-scale Road Extraction from Satellite Imagery ##
 
-This repository is designed to train models to detect road networks and travel time estimates over entire cities.  We expand upon the the [framework](https://github.com/SpaceNetChallenge/RoadDetector/tree/master/albu-solution) created by albu for the SpaceNet 3 competition, adding post-processing modules, travel time inference, and the ability to scale to large regions.  
+This repository is designed to train models to detect road networks over entire cities.  We expand upon the the framework created by [albu](https://github.com/SpaceNetChallenge/RoadDetector/tree/master/albu-solution) for the SpaceNet 3 competition, adding post-processing modules, and the ability to scale to large regions.  
 
 ____
 ### Install ###
@@ -53,7 +53,3 @@ ____
 4. Create graph
 
 	`python /path_to_cresi/src/wkt_to_G.py json/resnet34_ave_speed_mc_focal.json`
-
-5. Infer road travel time and speed limit
-
-	`python /path_to_cresi/src/skeleton_speed.py json/resnet34_ave_speed_mc_focal.json`

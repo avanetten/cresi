@@ -734,7 +734,6 @@ def main():
         
     tf = time.time()
     logger1.info("Time to run wkt_to_G.py: {} seconds".format(tf - t0))
-#     #wkt_to_shp(wkt_list, shp_file)
     
 ###############################################################################
 if __name__ == "__main__":
