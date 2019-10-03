@@ -8,13 +8,13 @@ See our [arXiv](https://arxiv.org/abs/1908.09715) paper for further details.
 ____
 ### Install ###
 
-0. Download this repository
+1. Download this repository
 
-1. Build docker image
+2. Build docker image
 
 	`nvidia-docker build -t cresi /path_to_cresi/docker`
 	
-2. Create docker container (all commands should be run in this container)
+3. Create docker container (all commands should be run in this container)
 
 	`nvidia-docker run -it --rm -ti --ipc=host --name cresi_image cresi`
 	
@@ -22,11 +22,11 @@ ____
 ____
 ### Prep ###
 
-0. Prepare train/test data, e.g.:
+1. Prepare train/test data, e.g.:
 
 	`python /path_to_cresi/cresi/data_prep/speed_masks.py`
 	
-1. Edit .json file to select desired variables and point to appropriate directories
+2. Edit .json file to select desired variables and point to appropriate directories
 
 
 ____
