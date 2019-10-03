@@ -22,11 +22,11 @@ ____
 
 2. Build docker image
 
-	`nvidia-docker build -t cresi /path_to_cresi/docker`
+		nvidia-docker build -t cresi /path_to_cresi/docker
 	
 3. Create docker container (all commands should be run in this container)
 
-	`nvidia-docker run -it --rm -ti --ipc=host --name cresi_image cresi`
+		nvidia-docker run -it --rm -ti --ipc=host --name cresi_image cresi
 	
 
 ____
@@ -34,7 +34,7 @@ ____
 
 1. Prepare train/test data, e.g.:
 
-	`python /path_to_cresi/cresi/data_prep/speed_masks.py`
+		python /path_to_cresi/cresi/data_prep/speed_masks.py
 	
 2. Edit .json file to select desired variables and point to appropriate directories
 
@@ -44,20 +44,20 @@ ____
 
 1. All at once
 
-	`cd /path_to_cresi/cresi`
+		cd /path_to_cresi/cresi
 	
-	`./train.sh jsons/sn5_baseline.json`
+		./train.sh jsons/sn5_baseline.json
 
 
 2. Run commands individually
 
 	A. Generate folds (within docker image)
 
-		`python /path_to_cresi/cresi/00_gen_folds.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/00_gen_folds.py jsons/sn5_baseline.json
 
 	B. Run train script (within docker image)
 
-		`python /path_to_cresi/cresi/01_train.py jsons/sn5_baseline.json --fold=0`
+		python /path_to_cresi/cresi/01_train.py jsons/sn5_baseline.json --fold=0
 	
 
 
@@ -67,9 +67,9 @@ ____
 
 1. All at once
 
-	`cd /path_to_cresi/cresi`
+		cd /path_to_cresi/cresi
 	
-	`./test.sh jsons/sn5_baseline.json`
+		./test.sh jsons/sn5_baseline.json
 	
 
 2. Run commands individually
@@ -77,26 +77,26 @@ ____
 
 	A. Execute inference (within docker image)
 
-		`python /path_to_cresi/cresi/02_eval.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/02_eval.py jsons/sn5_baseline.json
 
 	B. Merge predictions (if required)
 
-		`python /path_to_cresi/cresi/03a_merge_preds.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/03a_merge_preds.py jsons/sn5_baseline.json
 	
 	C. Stitch together mask windows (if required)
 
-		`python /path_to_cresi/cresi/03b_stitch.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/03b_stitch.py jsons/sn5_baseline.json
 
 	D. Extract mask skeletons
 
-		`python /path_to_cresi/cresi/04_skeletonize.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/04_skeletonize.py jsons/sn5_baseline.json
 	
 	E. Create graph
 
-		`python /path_to_cresi/cresi/05_wkt_to_G.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/05_wkt_to_G.py jsons/sn5_baseline.json
 
 	F. Infer road travel time and speed limit
 
-		`python /path_to_cresi/cresi/06_infer_speed.py jsons/sn5_baseline.json`
+		python /path_to_cresi/cresi/06_infer_speed.py jsons/sn5_baseline.json
 	
 
