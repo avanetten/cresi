@@ -35,6 +35,7 @@ ____
 1. All at once
 
 	`cd /path_to_cresi/cresi`
+	
 	`./train.sh jsons/sn5_baseline.json`
 
 
@@ -57,6 +58,7 @@ ____
 1. All at once
 
 	`cd /path_to_cresi/cresi`
+	
 	`./test.sh jsons/sn5_baseline.json`
 	
 
