@@ -1,6 +1,3 @@
-#run only on GPU instance and with --ipc=host option
-
-# modeled after sn4_baseline
 FROM nvidia/cuda:9.0-devel-ubuntu16.04
 MAINTAINER avanetten
 
@@ -70,28 +67,30 @@ RUN conda create -n cresi python=3.6 \
                     && echo "source activate cresi" > ~/.bashrc
 ENV PATH /opt/conda/envs/cresi/bin:$PATH
 
+# # install keras with tf backend?
+# ENV KERAS_BACKEND=tensorflow
+# RUN source activate cresise \
+#   && conda install -n cresi keras
+
 RUN mkdir -p /root/.torch/models
 RUN wget https://download.pytorch.org/models/resnet34-333f7ec4.pth -P /root/.torch/models
 RUN wget http://download.pytorch.org/whl/cu80/torch-0.3.0.post4-cp36-cp36m-linux_x86_64.whl
 RUN pip install torch-0.3.0.post4-cp36-cp36m-linux_x86_64.whl \
  	&& pip install tensorboardX \
+	&& pip install torchsummary \
 	&& pip install utm \
 	&& pip install numba
-
-
-# install various conda dependencies into the cresi environment
-RUN conda install -n cresi \
-			  gdal=2.4.0
 			  
 RUN conda install -n cresi \
-		   	  geopandas=0.4.1 \
-			  fiona=1.8.4 \
-			  rasterio=1.0.21 \
-              osmnx=0.9 \
+			  gdal=2.4.2 \
+		   	  geopandas \
+			  fiona \
+			  rasterio \
+              osmnx=0.10 \
      	      awscli \
               affine \
               pyproj \
-              pyhamcrest=1.9.0 \
+              pyhamcrest \
               cython \
               fiona \
               h5py \
@@ -104,6 +103,7 @@ RUN conda install -n cresi \
 	          ncurses \
               numpy \
 			  statsmodels \
+              #opencv \
               pandas \
               pillow \
               pip \
@@ -116,7 +116,10 @@ RUN conda install -n cresi \
               testpath \
               tqdm \
               pandas \
-			  opencv=4.0.0 \
+              #geopandas \
+              #rasterio \
+			  #opencv=4.0.0 \
+			  opencv \
 	&& conda clean -p \
 	&& conda clean -t \
 	&& conda clean --yes --all
