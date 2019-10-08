@@ -104,8 +104,7 @@ if __name__ == "__main__":
 
     # set some vals
     ###################
-    buffer_meters = float(config.mask_width_m)
-    buffer_meters_str = str(np.round(buffer_meters,1)).replace('.', 'p')
+
         
     path_masks_train =       os.path.join(config.path_data_root, config.train_data_refined_dir_masks)
     if not os.path.exists(path_masks_train):
@@ -114,8 +113,10 @@ if __name__ == "__main__":
     if not os.path.exists(path_images_8bit_train):
         path_images_8bit_train = config.train_data_refined_dir_ims
 
-    #path_masks_train =       os.path.join(config.path_data_root, config.train_data_refined_dir, 'masks{}m'.format(buffer_meters_str))
-    #path_images_8bit_train = os.path.join(config.path_data_root, config.train_data_refined_dir, 'images')
+    # buffer_meters = float(config.mask_width_m)
+    # buffer_meters_str = str(np.round(buffer_meters,1)).replace('.', 'p')
+    # path_masks_train =       os.path.join(config.path_data_root, config.train_data_refined_dir, 'masks{}m'.format(buffer_meters_str))
+    # path_images_8bit_train = os.path.join(config.path_data_root, config.train_data_refined_dir, 'images')
     paths = {
             'masks': path_masks_train,
             'images': path_images_8bit_train
