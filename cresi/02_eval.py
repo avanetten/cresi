@@ -81,7 +81,7 @@ def eval_cresi(config, paths, fn_mapping, image_suffix, save_dir, test=True,
 ###############################################################################
 if __name__ == "__main__":
     
-    save_im_gdal_format =  True #False
+    save_im_gdal_format =  False
     #save_im_skimage = False
     
     parser = argparse.ArgumentParser()
@@ -97,9 +97,9 @@ if __name__ == "__main__":
     
     # set some vals
     ###################
-    buffer_meters = float(config.mask_width_m)
-    buffer_meters_str = str(np.round(buffer_meters,1)).replace('.', 'p')
-    test = not args.training
+    # buffer_meters = float(config.mask_width_m)
+    # buffer_meters_str = str(np.round(buffer_meters,1)).replace('.', 'p')
+    # test = not args.training
 
     # update config file (only if t esting!!!)
     #rows, cols = 1344, 1344
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     logging.info("Saving eval outputs to: {x}".format(x=save_dir))
     #print ("Saving eval outputs to:", save_dir)
     folds = eval_cresi(config, paths, fn_mapping, image_suffix, save_dir,
-                       test=test, weight_dir=weight_dir, 
+                       test=True, weight_dir=weight_dir, 
                        num_channels=config.num_channels,
                        nfolds=config.num_folds,
                        save_im_gdal_format=save_im_gdal_format)
