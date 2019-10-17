@@ -13,6 +13,7 @@ For further details see:
 	2. [Road Speeds](https://medium.com/the-downlinq/inferring-route-travel-times-with-spacenet-7f55e1afdd6d)
 	3. [OSM+Google Imagery](https://medium.com/the-downlinq/computer-vision-with-openstreetmap-and-spacenet-a-comparison-cc70353d0ace)
 	4. [Data Prep](https://medium.com/the-downlinq/the-spacenet-5-baseline-part-1-imagery-and-label-preparation-598af46d485e)
+	5. [Road Graph + Speed](https://medium.com/the-downlinq/the-spacenet-5-baseline-part-3-extracting-road-speed-vectors-from-satellite-imagery-5d07cd5e1d21)
 
 
 ____
