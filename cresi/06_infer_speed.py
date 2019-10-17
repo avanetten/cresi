@@ -26,14 +26,12 @@ import matplotlib
 matplotlib.use('agg')
 from matplotlib import collections as mpl_collections
 import matplotlib.pyplot as plt
+from jsons.config import Config
+import argparse
+import json
 
-import 08a_plot_graph_plus_imph_plus_im
-# path_core = os.path.dirname(os.path.realpath(__file__))
-# sys.path.append(path_core)
-# import 04_skeletonize
+from utils import make_logger
 
-
-from other_tools import make_logger
 logger1 = None
 
 ###############################################################################
@@ -51,6 +49,7 @@ def weighted_avg_and_std(values, weights):
 
     return (mean, std, var)
 
+
 ###############################################################################
 def load_speed_conversion_dict_contin(csv_loc):
     '''Load speed to burn_val conversion dataframe 
@@ -62,12 +61,14 @@ def load_speed_conversion_dict_contin(csv_loc):
     dic = df_tmp.to_dict()['speed']    
     return df_, dic
 
+
 ###############################################################################
 def get_nearest_key(dic, val):
     '''Get nearest dic key to the input val''' 
     myList = dic
     key = min(myList, key=lambda x:abs(x-val))
     return key
+    
 
 ###############################################################################
 def load_speed_conversion_dict_binned(csv_loc, speed_increment=5):
@@ -121,16 +122,6 @@ def load_speed_conversion_dict_binned(csv_loc, speed_increment=5):
     
     return df_, dic
 
-#data_dir_root = '/raid/cosmiq/spacenet/data/spacenetv2/basiss_rgb_8bit_train2' #AOI_2_Vegas_Train/'
-#speed_conversion_file_binned = os.path.join(data_dir_root, 'speed_conversion_binned.csv')
-#csv_loc = speed_conversion_file_binned 
-#df_ = pd.read_csv(csv_loc, index_col=0)
-#df = df_[['channel', 'speed']]
-##df_tmp = df.set_index('channel')
-#Z = df.groupby(['channel']).mean().astype(int)
-#dic = Z.to_dict()['speed'] 
-#logger1.info("Z: " + Z)
-#logger1.info("dic: " + dic)
 
 ###############################################################################
 def get_linestring_midpoints(geom):
@@ -184,6 +175,7 @@ def get_patch_speed_singlechannel(patch, conv_dict, percentile=80,
 #    ########## 
     
     return speed, patch_filt
+   
    
 ###############################################################################
 def get_patch_speed_multichannel(patch, conv_dict, min_z=128, 
@@ -437,6 +429,7 @@ def infer_travel_time(G_, mask, conv_dict,
     
     return G_
 
+
 ###############################################################################
 def add_travel_time_dir(graph_dir, mask_dir, conv_dict, graph_dir_out,
                       min_z=128, dx=4, dy=4, percentile=90,
@@ -601,15 +594,6 @@ def plot_graph_on_im_yuge(G_, im_test_file, figsize=(12,12), show_endnodes=False
             node_y.append(yp)
             y_set.add(yp)
             
-#        if u not in node_set:
-#            node_x.append( coords[0][0] )
-#            node_y.append( coords[0][1] )
-#            node_set.add(u)
-#        if v not in node_set:
-#            node_x.append( coords[-1][0] )
-#            node_y.append( coords[-1][1] )
-#            node_set.add(v)
-            
         if type(width_key) == str:
             if super_verbose:
                 logger1.info("edge_data[width_key]: " + str(edge_data[width_key]))
@@ -742,16 +726,11 @@ def test():
             #logger1.info(i, u , v, data)
 
         
-    
 ###############################################################################
 def main():
     
     '''See _arr_slicing_speed.ipynb for better tests'''
     global logger1
-    
-    from config import Config
-    import argparse
-    import json
     
     parser = argparse.ArgumentParser()
     parser.add_argument('config_path')
@@ -769,29 +748,11 @@ def main():
     min_z = 128     # min z value to consider a hit
     N_plots = 20
     figsize = (12, 12)
-    node_color, edge_color = 'OrangeRed', '#ff571a'
-    node_color, edge_color = '#00e699', '#1affb2'  # aquamarine
-    node_color, edge_color = 'turquoise', '#65e6d9'  # turqoise
-    node_color, edge_color = 'deepskyblue', '#33ccff'
-    node_color, edge_color = '#e68a00', '#ffa31a' # orange
-    node_color, edge_color = '#33ff99', 'SpringGreen'
-    node_color, edge_color = 'DarkViolet', 'BlueViolet' #'#b300ff'
-    node_color, edge_color = '#a446d2',  'BlueViolet'
-    #node_color='#0086CC' # cosmiq logo color (blue)
-    #edge_color='#00a6ff',
-    #node_color = '#33cccc' #turquise
-    #edge_color = '#47d1d1'
-    #node_color, edge_color = '#ffd100', '#e09900', # orange gold
-    #node_color = '#29a329' # green
-    #edge_color = '#33cc33'
-    #node_color='#66ccff' # blue
-    #edge_color='#999999'
     
     # best colors
     node_color, edge_color = '#cc9900', '#ffbf00'  # gold
-    #node_color, edge_color = 'l#4dff4d', '#00e600' # green
 
-    default_node_size = 2 #0.15 #4
+    default_node_size = 2 
     plot_width_key, plot_width_mult = 'inferred_speed_mph', 0.085 # 0.08  # variable width
     #width_key, width_mult = 4, 1   # constant width
     if config.num_classes == 8:
@@ -806,7 +767,6 @@ def main():
     verbose = False
     ##########    
  
-    
     # input dirs
     res_root_dir = os.path.join(config.path_results_root, config.test_results_dir)
     #path_images = os.path.join(config.path_data_root, config.test_data_refined_dir)
@@ -831,33 +791,8 @@ def main():
             mask_dir = folds_dir
             mask_prefix = 'fold0_'
             
-    #if os.path.exists(out_dir_mask_norm):
-    #    mask_dir = out_dir_mask_norm
-    #else:
-    #    mask_dir = merge_dir
     log_file = os.path.join(res_root_dir, 'skeleton_speed.log')
     console, logger1 = make_logger.make_logger(log_file, logger_name='log')
-#    ###############################################################################
-#    # https://docs.python.org/3/howto/logging-cookbook.html#logging-to-multiple-destinations
-#    # set up logging to file - see previous section for more details
-#    logging.basicConfig(level=logging.DEBUG,
-#                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-#                        datefmt='%m-%d %H:%M',
-#                        filename=log_file,
-#                        filemode='w')
-#    # define a Handler which writes INFO messages or higher to the sys.stderr
-#    console = logging.StreamHandler()
-#    console.setLevel(logging.INFO)
-#    # set a format which is simpler for console use
-#    formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    #formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    # tell the handler to use this format
-#    console.setFormatter(formatter)
-#    # add the handler to the root logger
-#    logging.getLogger('').addHandler(console)
-#    logger1 = logging.getLogger('log')
-#    logger1.info("log file: {x}".format(x=log_file))
-#    ###############################################################################  
 
     # output dirs
     graph_speed_dir = os.path.join(res_root_dir, config.graph_dir + '_speed')
@@ -865,21 +800,15 @@ def main():
     logger1.info("graph_speed_dir: " + graph_speed_dir)
 
     # speed conversion dataframes (see _speed_data_prep.ipynb)
-    speed_conversion_file_contin = os.path.join(config.path_data_root, 
-                                                config.train_data_refined_dir, 
-                                                'SN5_roads_train_speed_conversion_contin.csv')
-    speed_conversion_file_binned = os.path.join(config.path_data_root, 
-                                                config.train_data_refined_dir, 
-                                                'SN5_roads_train_speed_conversion_binned.csv')
-    
+    speed_conversion_file = config.speed_conversion_file
     # load conversion file
     # get the conversion diction between pixel mask values and road speed (mph)
     if config.num_classes > 1:
         conv_df, conv_dict \
-            = load_speed_conversion_dict_binned(speed_conversion_file_binned)
+            = load_speed_conversion_dict_binned(speed_conversion_file)
     else:
          conv_df, conv_dict \
-            = load_speed_conversion_dict_contin(speed_conversion_file_contin)
+            = load_speed_conversion_dict_contin(speed_conversion_file)
     logger1.info("speed conv_dict: " + str(conv_dict))
     
     # Add travel time to entire dir
@@ -901,17 +830,6 @@ def main():
     if N_plots > 0:
         
         logger1.info("\nPlot a few...")
-        ## import apls_tools (or just copy plot_graph_on_in() func he)
-        #local = False
-        ## local
-        #if local:
-        #    apls_dir = '/raid/cosmiq/apls/apls/src'
-        ## dev box
-        #else:
-        #    apls_dir = '/raid/local/src/apls/apls/src'
-        #sys.path.append(apls_dir)
-        #import apls_tools 
-    
         # define output dir
         graph_speed_plots_dir = os.path.join(res_root_dir, config.graph_dir + '_speed_plots')
         os.makedirs(graph_speed_plots_dir, exist_ok=True)
@@ -948,50 +866,11 @@ def main():
                              title=image_name, figname=figname, 
                              verbose=True, super_verbose=verbose)
 
-
-            # use 08a_plot_graph_plus_im?
-            if run_08a_plot_graph_plus_im:
-                graph_speed_plots_dir2 = os.path.join(res_root_dir, config.graph_dir + '_speed_plots2')
-                os.makedirs(graph_speed_plots_dir2, exist_ok=True)
-                figname2 = os.path.join(graph_speed_plots_dir2, image_name)
-                # shanghai yuge settings 
-                fig_height2=12
-                fig_width2=12
-                node_color2='#66ccff'  # light blue
-                node_size2=1#0.4
-                node_alpha2=0.6
-                edge_color2='#bfefff'   # lightblue1
-                edge_linewidth2=0.15
-                edge_alpha2=0.6
-                # read in image
-                try:
-                    im_cv2 = cv2.imread(image_path, 1)
-                    img_mpl = cv2.cvtColor(im_cv2, cv2.COLOR_BGR2RGB)   
-                except:
-                    img_sk = skimage.io.imread(image_path)
-                    # make sure image is h,w,channels (assume less than 20 channels)
-                    if (len(img_sk.shape) == 3) and (img_sk.shape[0] < 20): 
-                        img_mpl = np.moveaxis(img_sk, 0, -1)
-                    else:
-                        img_mpl = img_sk
-                _ = 08a_plot_graph_plus_im.plot_graph_pix(G, img_mpl, 
-                               fig_height=fig_height2, fig_width=fig_width2, 
-                               node_size=node_size2, node_alpha=node_alpha2, 
-                               node_color=node_color2, 
-                               edge_linewidth=edge_linewidth2, 
-                               edge_alpha=edge_alpha2, edge_color=edge_color2,
-                               filename=figname2, default_dpi=300,                        
-                               show=False, save=True)
-
     t2 = time.time()
     logger1.info("Time to execute add_travel_time_dir(): {x} seconds".format(x=t1-t0))
     logger1.info("Time to make plots: {x} seconds".format(x=t2-t1))
     logger1.info("Total time: {x} seconds".format(x=t2-t0))
 
-
-            #except:
-            #    logger1.info("Failed to plot: " + figname )
-            #    continue
             
 ###############################################################################
 if __name__ == "__main__":

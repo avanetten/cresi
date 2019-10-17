@@ -17,6 +17,7 @@ Config = namedtuple("Config", [
 
   "train_data_refined_dir_ims",
   "train_data_refined_dir_masks",
+  "speed_conversion_file",
   "folds_file_name",
   
   "test_data_refined_dir",

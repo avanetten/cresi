@@ -4,6 +4,7 @@
     "path_data_root": "/path/to/data/cresi_data/",
     "train_data_refined_dir_ims": "/path/to/data/cresi_data/8bit/PS-RGB",
     "train_data_refined_dir_masks": "/path/to/data/cresi_data/cresi_train/train_mask_binned_mc",
+	"speed_conversion_file:" "/path/to/data/cresi_data/cresi_train/SN5_roads_train_speed_conversion_binned.csv"
     "folds_file_name": "folds4.csv",
     "save_weights_dir": "sn5_baseline",
     "num_folds": 1,
@@ -28,7 +29,7 @@
     "skeleton_band": 7,
     "skeleton_thresh": 0.3,
     "min_subgraph_length_pix": 20,
-    "min_spur_length_m": 1,
+    "min_spur_length_m": 10,
 
     "merged_dir": "merged",
     "stitched_dir_raw": "stitched/mask_raw",
