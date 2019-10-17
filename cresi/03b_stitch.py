@@ -16,13 +16,9 @@ import skimage.io
 import cv2
 import time
 import logging
-from json.config import Config
+from jsons.config import Config
 from utils import make_logger
 
-#import sys
-#path_basiss = os.path.dirname(os.path.realpath(__file__))
-#sys.path.append(path_basiss)
-#import basiss
 
 ###############################################################################
 def post_process_image(df_pos_, data_dir, num_classes=1, im_prefix='',
@@ -89,17 +85,6 @@ def post_process_image(df_pos_, data_dir, num_classes=1, im_prefix='',
                 # print("reorder mask_slice_refine.shape", mask_slice_refine.shape)
                 mask_slice_refine = np.moveaxis(mask_slice_refine, 0, -1)
                 
-            #print ("mask_slice_refine.shape:", mask_slice_refine.shape)
-            #print ("Time to read image:", time.time() - t01, "seconds")
-
-#                # we want skimage to read in (channels, h, w) for multi-channel
-#                #   assume less than 20 channels
-#                #print ("mask_channels.shape:", mask_channels.shape)
-#                if prob_arr_tmp.shape[0] > 20: 
-#                    #print ("mask_channels.shape:", mask_channels.shape)
-#                    prob_arr = np.moveaxis(prob_arr_tmp, 0, -1)
-#                    #print ("mask.shape:", mask.shape)  
-
         # rescale make slice?
         if rescale_factor != 1:
             mask_slice_refine = (mask_slice_refine / rescale_factor).astype(np.uint8)
@@ -129,9 +114,6 @@ def post_process_image(df_pos_, data_dir, num_classes=1, im_prefix='',
     overlay_count[np.where(overlay_count == 0)] = 1
     if rescale_factor != 1:
         mask_raw = mask_raw.astype(np.uint8)
-    
-    #print ("np.max(overlay_count):", np.max(overlay_count))
-    #print ("np.min(overlay_count):", np.min(overlay_count))
                   
     # throws a memory error if using np.divide...
     if (w < 60000) and (h < 60000):
@@ -144,16 +126,6 @@ def post_process_image(df_pos_, data_dir, num_classes=1, im_prefix='',
         for j in range(h):
             #print ("j:", j)
             mask_norm[j] = (mask_raw[j] / overlay_count[j]).astype(np.uint8)
-
-#    # throws a memory error if using np.divide...
-#    if (w < 60000) and (h < 60000):
-#        mask_norm = np.divide(mask_raw, overlay_count).astype(np.uint8)
-#    else:
-#        for j in range(h):
-#            #print ("j:", j)
-#            mask_norm[j] = (mask_raw[j] / overlay_count[j]).astype(np.uint8)
-#            #for k in range(w): 
-#            #    mask_norm[j,k] = (mask_raw[j,k] / overlay_count[j,k]).astype(np.uint8)
     
     # rescale mask_norm
     if rescale_factor != 1:
@@ -232,9 +204,6 @@ def post_process_image_3band(df_pos_, data_dir, n_bands=3, im_prefix='',
     overlay_count[np.where(overlay_count == 0)] = 1
     if rescale_factor != 1:
         im_raw = im_raw.astype(np.uint8)
-    
-    #print ("np.max(overlay_count):", np.max(overlay_count))
-    #print ("np.min(overlay_count):", np.min(overlay_count))
                   
     # throws a memory error if using np.divide...
     if h < 60000:
@@ -249,9 +218,6 @@ def post_process_image_3band(df_pos_, data_dir, n_bands=3, im_prefix='',
     if rescale_factor != 1:
         im_norm = (im_norm * rescale_factor).astype(np.uint8)
     
-    #print ("im_norm.shape:", im_norm.shape)
-    #print ("im_norm.dtype:", im_norm.dtype)
-
     return name, im_norm, im_raw, overlay_count   
 
 ###############################################################################
@@ -298,17 +264,6 @@ def main():
     
     # assume tile csv is in data dir, not root dir
     path_tile_df_csv = os.path.join(config.path_data_root, os.path.dirname(config.test_sliced_dir), config.tile_df_csv)
-    # try tile_df_csv in results path
-    #path_tile_df_csv = os.path.join(config.path_results_root, config.test_results_dir, config.tile_df_csv)
-
-    #out_dir_mask_norm = config.stitched_dir_norm #os.path.join(config.stitched_dir ,'mask_norm')
-    #out_dir_mask_raw = config.stitched_dir_raw #os.path.join(config.stitched_dir, 'mask_raw')
-    #out_dir_count = config.stitched_dir_count #os.path.join(config.stitched_dir, 'mask_count')
-    #res_root_dir = os.path.dirname(config.merged_dir)
-    ##out_dir_root = os.path.join(res_root_dir, 'stitched')
-    #out_dir_mask_norm = os.path.join(res_root_dir, 'stitched/mask_norm')
-    #out_dir_mask_raw = os.path.join(res_root_dir, 'stitched/mask_raw')
-    #out_dir_count = os.path.join(res_root_dir, 'stitched/mask_count')
     
     # make dirs
     os.makedirs(out_dir_mask_norm, exist_ok=True)  
@@ -318,30 +273,6 @@ def main():
     res_root_dir = os.path.join(config.path_results_root, config.test_results_dir)
     log_file = os.path.join(res_root_dir, 'stitch.log')
     console, logger1 = make_logger.make_logger(log_file, logger_name='log')
-#    ###############################################################################
-#    # https://docs.python.org/3/howto/logging-cookbook.html#logging-to-multiple-destinations
-#    # set up logging to file - see previous section for more details
-#    res_root_dir = os.path.join(config.path_results_root, config.test_results_dir)
-#    log_file = os.path.join(res_root_dir, 'stitch.log')
-#    logging.basicConfig(level=logging.DEBUG,
-#                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-#                        datefmt='%m-%d %H:%M',
-#                        filename=log_file,
-#                        filemode='w')
-#    # define a Handler which writes INFO messages or higher to the sys.stderr
-#    console = logging.StreamHandler()
-#    console.setLevel(logging.INFO)
-#    # set a format which is simpler for console use
-#    formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    #formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    # tell the handler to use this format
-#    console.setFormatter(formatter)
-#    # add the handler to the root logger
-#    logging.getLogger('').addHandler(console)
-#    logger1 = logging.getLogger('log')
-#    logger1.info("log file: {x}".format(x=log_file))
-#    ###############################################################################  
-    
     
     # read in df_pos
     #df_file = os.path.join(out_dir_root, 'tile_df.csv')
@@ -425,7 +356,6 @@ def main():
     #print ("Time to run stitch.py and create large masks (and save):", t3 - t0, "seconds")
 
     return
-
 
 
 if __name__ == "__main__":

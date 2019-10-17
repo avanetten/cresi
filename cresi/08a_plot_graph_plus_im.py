@@ -8,6 +8,8 @@ Created on Mon May 21 12:55:47 2018
 plotting adapted from:
     https://github.com/gboeing/osmnx/blob/master/osmnx/plot.py
 
+Combine with plot_prop_dos from road_raster.py
+
 """
 
 
@@ -33,12 +35,107 @@ import geopandas as gpd
 from shapely.geometry import Point
 from shapely.geometry import LineString
 
+#import pandas as pd
+#import matplotlib.cm as cm
+#from descartes import PolygonPatch
+#from shapely.geometry import Polygon
+#from shapely.geometry import MultiPolygon
+
 # cv2 can't load large files, so need to import skimage too
 import skimage.io 
 import cv2
 
 from osmnx.utils import log, make_str
 import osmnx.settings as ox_settings
+
+from jsons.config import Config
+
+
+###############################################################################
+def load_graphml_v0p5(filename, folder=None):
+    """
+    Load a GraphML file from disk and convert the node/edge attributes to
+    correct data types.  Assume filename holds entire path to file s
+    from: https://github.com/gboeing/osmnx/blob/master/osmnx/save_load.py
+
+    Parameters
+    ----------
+    filename : string
+        the name of the graphml file (including file extension)
+    folder : string
+        the folder containing the file, if None, use default data folder
+    Returns
+    -------
+    networkx multidigraph
+    
+    change to undirected...
+    """
+    start_time = time.time()
+
+    G = nx.MultiGraph(nx.read_graphml(filename, node_type=int))
+#    # read the graph from disk
+#    if folder is None:
+#        folder = settings.data_folder
+#    path = os.path.join(folder, filename)
+#    G = nx.MultiDiGraph(nx.read_graphml(path, node_type=int))
+
+    # convert graph crs attribute from saved string to correct dict data type
+    G.graph['crs'] = ast.literal_eval(G.graph['crs'])
+
+    if 'streets_per_node' in G.graph:
+        G.graph['streets_per_node'] = ast.literal_eval(G.graph['streets_per_node'])
+
+    # convert numeric node tags from string to numeric data types
+    print('Converting node and edge attribute data types')
+    for _, data in G.nodes(data=True):
+        data['osmid'] = int(data['osmid'])
+        data['x'] = float(data['x'])
+        data['y'] = float(data['y'])
+        data['x_pix'] = float(data['x_pix'])
+        data['y_pix'] = float(data['y_pix'])
+        
+    # convert numeric, bool, and list node tags from string to correct data types
+    for _, _, data in G.edges(data=True, keys=False):
+        
+        data['length'] = float(data['length'])
+
+        # these attributes might have a single value, or a list if edge's
+        # topology was simplified
+        for attr in ['highway', 'name', 'bridge', 'tunnel', 'lanes', 'ref', 'maxspeed', 'service', 'access', 'area', 'landuse', 'width', 'est_width']:
+            # if this edge has this attribute, and it starts with '[' and ends
+            # with ']', then it's a list to be parsed
+            if attr in data and data[attr][0] == '[' and data[attr][-1] == ']':
+                # try to convert the string list to a list type, else leave as
+                # single-value string (and leave as string if error)
+                try:
+                    data[attr] = ast.literal_eval(data[attr])
+                except:
+                    pass
+
+        # osmid might have a single value or a list, but if single value, then
+        # parse int
+        if 'osmid' in data:
+            if data['osmid'][0] == '[' and data['osmid'][-1] == ']':
+                data['osmid'] = ast.literal_eval(data['osmid'])
+            else:
+                data['osmid'] = int(data['osmid'])
+
+        # if geometry attribute exists, load the string as well-known text to
+        # shapely LineString
+        if 'geometry' in data:
+            data['geometry'] = wkt.loads(data['geometry'])
+
+    # remove node_default and edge_default metadata keys if they exist
+    if 'node_default' in G.graph:
+        del G.graph['node_default']
+    if 'edge_default' in G.graph:
+        del G.graph['edge_default']
+
+    print('Loaded graph with {:,} nodes and {:,} edges in {:,.2f} seconds from "{}"'.format(len(list(G.nodes())),
+                                                                                          len(list(G.edges())),
+                                                                                          time.time()-start_time,
+                                                                                          filename))
+    return G
 
 
 ###############################################################################
@@ -119,6 +216,96 @@ def graph_to_gdfs_pix(G, nodes=True, edges=True, node_geometry=True, fill_edge_g
 
         to_return.append(gdf_edges)
         log('Created GeoDataFrame "{}" from graph in {:,.2f} seconds'.format(gdf_edges.gdf_name, time.time()-start_time))
+
+    if len(to_return) > 1:
+        return tuple(to_return)
+    else:
+        return to_return[0]
+
+
+
+
+###############################################################################
+def graph_to_gdfs_pix_v0p5(G, nodes=True, edges=True, node_geometry=True, 
+                  fill_edge_geometry=True):
+    """
+    Convert a graph into node and/or edge GeoDataFrames
+    Parameters
+    Use pixel coords
+    https://github.com/gboeing/osmnx/blob/v0.5.4/osmnx/save_load.py
+
+    ----------
+    G : networkx multidigraph
+    nodes : bool
+        if True, convert graph nodes to a GeoDataFrame and return it
+    edges : bool
+        if True, convert graph edges to a GeoDataFrame and return it
+    node_geometry : bool
+        if True, create a geometry column from node x and y data
+    fill_edge_geometry : bool
+        if True, fill in missing edge geometry fields using origin and
+        destination nodes
+    Returns
+    -------
+    GeoDataFrame or tuple
+        gdf_nodes or gdf_edges or both as a tuple
+    """
+
+    if not (nodes or edges):
+        raise ValueError('You must request nodes or edges, or both.')
+
+    to_return = []
+
+    if nodes:
+
+        start_time = time.time()
+
+        nodes = {node:data for node, data in G.nodes(data=True)}
+        gdf_nodes = gpd.GeoDataFrame(nodes).T
+        if node_geometry:
+            gdf_nodes['geometry_pix'] = gdf_nodes.apply(lambda row: Point(row['x_pix'], row['y_pix']), axis=1)
+        gdf_nodes.crs = G.graph['crs']
+        gdf_nodes.gdf_name = '{}_nodes'.format(G.graph['name'])
+        gdf_nodes['osmid'] = gdf_nodes['osmid'].astype(np.int64).map(ox.utils.make_str)
+
+        to_return.append(gdf_nodes)
+        print('Created GeoDataFrame "{}" from graph in {:,.2f} seconds'.format(gdf_nodes.gdf_name, time.time()-start_time))
+
+    if edges:
+
+        start_time = time.time()
+
+        # create a list to hold our edges, then loop through each edge in the
+        # graph
+        edges = []
+        for u, v, key, data in G.edges(keys=True, data=True):
+
+            # for each edge, add key and all attributes in data dict to the
+            # edge_details
+            edge_details = {'u':u, 'v':v, 'key':key}
+            for attr_key in data:
+                
+                edge_details[attr_key] = data[attr_key]
+
+            # if edge doesn't already have a geometry attribute, create one now
+            # if fill_edge_geometry==True
+            if 'geometry_pix' not in data:
+                if fill_edge_geometry:
+                    point_u = Point((G.node[u]['x_pix'], G.node[u]['y_pix']))
+                    point_v = Point((G.node[v]['x_pix'], G.node[v]['y_pix']))
+                    edge_details['geometry_pix'] = LineString([point_u, point_v])
+                else:
+                    edge_details['geometry_pix'] = np.nan
+
+            edges.append(edge_details)
+
+        # create a GeoDataFrame from the list of edges and set the CRS
+        gdf_edges = gpd.GeoDataFrame(edges)
+        gdf_edges.crs = G.graph['crs']
+        gdf_edges.gdf_name = '{}_edges'.format(G.graph['name'])
+
+        to_return.append(gdf_edges)
+        print('Created GeoDataFrame "{}" from graph in {:,.2f} seconds'.format(gdf_edges.gdf_name, time.time()-start_time))
 
     if len(to_return) > 1:
         return tuple(to_return)
@@ -243,9 +430,6 @@ def plot_graph_pix(G, im=None, bbox=None, fig_height=6, fig_width=None, margin=0
     else:
         fig, ax = plt.subplots(figsize=(fig_width, fig_height), facecolor=bgcolor)
         ax.set_facecolor(bgcolor)
-    ## create the figure and axis
-    #fig, ax = plt.subplots(figsize=(fig_width, fig_height), facecolor=bgcolor)
-    #ax.set_facecolor(bgcolor)
 
     # draw the edges as lines from node to node
     start_time = time.time()
@@ -590,38 +774,33 @@ def save_and_show(fig, ax, save, show, close, filename, file_format, dpi,
 def main():
     
     default_crs = {'init':'epsg:4326'}
-
-    # Vegas0 settings
+ 
+    # Vegas settings
     local = False
     fig_height=12
-    fig_width=12
-    node_color='#66ccff'  # light blue
-    #node_color='#8b3626' # tomato4
-    node_size=0.4
-    node_alpha=0.6
-    #edge_color='#999999'  # gray
-    #edge_color='#ee5c42'  # tomato2
-    edge_color='#bfefff'   # lightblue1
-    edge_linewidth=0.2
-    edge_alpha=0.5
+    fig_width=12 
+    node_color='#ffdd1a'
+    edge_color='#ffdd1a'
+    node_size=0.2
+    node_alpha=0.7
+    edge_linewidth=0.3
+    edge_alpha=0.8
     orig_dest_node_size=4.5*node_size
+    save_only_route_png = False  # True
 
     route_color='r'
     orig_dest_node_color='r'
     route_linewidth=4*edge_linewidth
-    
-    #dpi=1000 # set dpi latet using image size, to approximate native resolution
 
     # local
     if local:
         pass
-    
-    # deployed
+        
     else:
-        from config import Config
         parser = argparse.ArgumentParser()
         parser.add_argument('config_path')
         args = parser.parse_args()
+    
         with open(args.config_path, 'r') as f:
             cfg = json.load(f)
             config = Config(**cfg)
@@ -638,7 +817,7 @@ def main():
     
     # iterate through images and graphs, plot routes
     im_list = sorted([z for z in os.listdir(path_images_8bit) if z.endswith('.tif')])
-    
+
     if shuffle:
         random.shuffle(im_list)
 
@@ -655,10 +834,6 @@ def main():
         print ("\n\n", i, "im_root:", im_root)
         print ("  im_file:", im_file)
         print ("  graph_pkl:", graph_pkl)
-        
-        # read G
-        # graphml
-        #G = load_graphml(im_root_no_ext + '.graphml', folder=graph_dir)
         
         # gpickle?
         print ("Reading gpickle...")
@@ -683,6 +858,12 @@ def main():
         edge_tmp = list(G.edges())[-1]
         print (edge_tmp, "random edge props:", G.edges([edge_tmp[0], edge_tmp[1]])) #G.edge[edge_tmp[0]][edge_tmp[1]])
 
+        #node = G.nodes()[-1]
+        #print ("node:", node, "props:", G.node[node])
+        #u,v = G.edges()[-1]
+        #print ("edge:", u,v, "props:", G.edge[u][v])
+
+
         # read in image, cv2 fails on large files
         print ("Read in image...")
         try:
@@ -701,7 +882,8 @@ def main():
         dpi = int(np.min([3500, desired_dpi ]))
         print ("plot dpi:", dpi)
 
-        # plot graph with image background
+
+        # plot graph with image backround
         if not save_only_route_png:
             out_file_plot = os.path.join(out_dir, im_root_no_ext + '_ox_plot.tif')
             print ("outfile_plot:", out_file_plot)
@@ -711,74 +893,74 @@ def main():
                            filename=out_file_plot, default_dpi=dpi,                        
                            show=False, save=True)
             
-       ################
-       # plot graph route
-       print ("\nPlot a random route on the graph...")
-       t0 = time.time()
-       # set source
-       source_idx = np.random.randint(0,len(G.nodes()))
-       source = list(G.nodes())[source_idx]
-       # get routes
-       lengths, paths = nx.single_source_dijkstra(G, source=source, weight='length')
-       # random target
-       targ_idx = np.random.randint(0, len(list(lengths.keys())))
-       target = list(lengths.keys())[targ_idx]
-       # specific route
-       route = paths[target]
-
-       print ("source:", source)
-       print ("target:", target)
-       print ("route:", route)
-
-       # plot route
-       out_file_route = os.path.join(out_dir, im_root_no_ext + '_ox_route_r0.tif')
-       print ("outfile_route:", out_file_route)
-       plot_graph_route_pix(G, route, im=im, fig_height=fig_height, fig_width=fig_width,
-                      node_size=node_size, node_alpha=node_alpha, node_color=node_color,
-                      edge_linewidth=edge_linewidth, edge_alpha=edge_alpha, edge_color=edge_color,
-                      orig_dest_node_size=orig_dest_node_size,
-                      route_color=route_color,
-                      orig_dest_node_color=orig_dest_node_color,
-                      route_linewidth=route_linewidth,
-                      filename=out_file_route, dpi=dpi,
-                      show=False, save=True)
-       t1 = time.time()
-       print ("Time to run plot_graph_route_pix():", t1-t0, "seconds")
-
-
-       ################
-       # plot another graph route?
-       print ("\nPlot another random route on the graph...")
-       t0 = time.time()
-       # set source
-       source_idx = np.random.randint(0,len(G.nodes()))
-       source = list(G.nodes())[source_idx]
-       # get routes
-       lengths, paths = nx.single_source_dijkstra(G, source=source, weight='length')
-       # random target
-       targ_idx = np.random.randint(0, len(list(lengths.keys())))
-       target = list(lengths.keys())[targ_idx]
-       # specific route
-       route = paths[target]
-
-       print ("source:", source)
-       print ("target:", target)
-       print ("route:", route)
-
-       # plot another route
-       out_file_route = os.path.join(out_dir, im_root_no_ext + '_ox_route_r1.tif')
-       print ("outfile_route:", out_file_route)
-       plot_graph_route_pix(G, route, im=im, fig_height=fig_height, fig_width=fig_width,
-                      node_size=node_size, node_alpha=node_alpha, node_color=node_color,
-                      edge_linewidth=edge_linewidth, edge_alpha=edge_alpha, edge_color=edge_color,
-                      orig_dest_node_size=orig_dest_node_size,
-                      route_color=route_color,
-                      orig_dest_node_color=orig_dest_node_color,
-                      route_linewidth=route_linewidth,
-                      filename=out_file_route, dpi=dpi,
-                      show=False, save=True)
-       t1 = time.time()
-       print("Time to run plot_graph_route_pix():", t1-t0, "seconds")
+#        ################            
+#        # plot graph route
+#        print ("\nPlot a random route on the graph...")
+#        t0 = time.time()
+#        # set source
+#        source_idx = np.random.randint(0,len(G.nodes()))
+#        source = list(G.nodes())[source_idx]
+#        # get routes
+#        lengths, paths = nx.single_source_dijkstra(G, source=source, weight='length')
+#        # random target
+#        targ_idx = np.random.randint(0, len(list(lengths.keys())))
+#        target = list(lengths.keys())[targ_idx]
+#        # specific route
+#        route = paths[target]
+# 
+#        print ("source:", source)
+#        print ("target:", target)
+#        print ("route:", route)
+#        
+#        # plot route       
+#        out_file_route = os.path.join(out_dir, im_root_no_ext + '_ox_route_r0.tif')
+#        print ("outfile_route:", out_file_route)
+#        plot_graph_route_pix(G, route, im=im, fig_height=fig_height, fig_width=fig_width, 
+#                       node_size=node_size, node_alpha=node_alpha, node_color=node_color, 
+#                       edge_linewidth=edge_linewidth, edge_alpha=edge_alpha, edge_color=edge_color,
+#                       orig_dest_node_size=orig_dest_node_size,
+#                       route_color=route_color, 
+#                       orig_dest_node_color=orig_dest_node_color,
+#                       route_linewidth=route_linewidth,
+#                       filename=out_file_route, dpi=dpi,                        
+#                       show=False, save=True)
+#        t1 = time.time()
+#        print ("Time to run plot_graph_route_pix():", t1-t0, "seconds")
+#
+#
+#        ################
+#        # plot another graph route?
+#        print ("\nPlot another random route on the graph...")
+#        t0 = time.time()
+#        # set source
+#        source_idx = np.random.randint(0,len(G.nodes()))
+#        source = list(G.nodes())[source_idx]
+#        # get routes
+#        lengths, paths = nx.single_source_dijkstra(G, source=source, weight='length')
+#        # random target
+#        targ_idx = np.random.randint(0, len(list(lengths.keys())))
+#        target = list(lengths.keys())[targ_idx]
+#        # specific route
+#        route = paths[target]
+# 
+#        print ("source:", source)
+#        print ("target:", target)
+#        print ("route:", route)
+#        
+#        # plot another route       
+#        out_file_route = os.path.join(out_dir, im_root_no_ext + '_ox_route_r1.tif')
+#        print ("outfile_route:", out_file_route)
+#        plot_graph_route_pix(G, route, im=im, fig_height=fig_height, fig_width=fig_width, 
+#                       node_size=node_size, node_alpha=node_alpha, node_color=node_color, 
+#                       edge_linewidth=edge_linewidth, edge_alpha=edge_alpha, edge_color=edge_color,
+#                       orig_dest_node_size=orig_dest_node_size,
+#                       route_color=route_color, 
+#                       orig_dest_node_color=orig_dest_node_color,
+#                       route_linewidth=route_linewidth,
+#                       filename=out_file_route, dpi=dpi,                        
+#                       show=False, save=True)
+#        t1 = time.time()
+#        print("Time to run plot_graph_route_pix():", t1-t0, "seconds")
 
         
 ###############################################################################

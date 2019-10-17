@@ -7,11 +7,12 @@ Created on Tue Aug 27 14:23:22 2019
 """
 
 import os
+import json
 import argparse
 import pandas as pd
 import networkx as nx
 # import shapely.wkt
-# import apls
+from jsons.config import Config
 
 
 ###############################################################################
@@ -94,8 +95,6 @@ def pkl_dir_to_wkt(pkl_dir, output_csv_path='',
         else:
             cols_new.append(z)
     cols = cols_new
-    # cols = [z.replace('length', 'length_m') for z in cols]
-    # cols = [z.replace('travel_time', 'travel_time_s') for z in cols]
     print("cols:", cols)
 
     df = pd.DataFrame(wkt_list, columns=cols)
@@ -113,24 +112,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('config_path')
     args = parser.parse_args()
+
     with open(args.config_path, 'r') as f:
         cfg = json.load(f)
         config = Config(**cfg)
      
     root_dir = os.path.join(config.path_results_root, 
-                            config.test_results_dir,    
+                            config.test_results_dir) 
 
-
-    # # if not using config
-    # parser.add_argument('--root_dir', default='', type=str,
-    #                     help='Root directory of data')
-    # args = parser.parse_args()
-    #
-    # weight_keys = ['length', 'travel_time_s']
-    # # weight_keys = ['length', 'travel_time_s']
-    # verbose = True
-
-    root_dir = args.root_dir
+    weight_keys = ['length', 'travel_time_s']
+    verbose = True
     pkl_dir = os.path.join(root_dir, 'graphs_speed')
     output_csv_path = os.path.join(root_dir,
                                    'solution.csv')
@@ -138,13 +129,3 @@ if __name__ == "__main__":
     df = pkl_dir_to_wkt(pkl_dir,
                         output_csv_path=output_csv_path,
                         weight_keys=weight_keys, verbose=verbose)
-
-    '''
-    Execute
-    
-    python create_submission_wkt.py \
-        	--root_dir=/raid/local/src/cresi/results/resnet34_ave_speed_mc_focal_totband_mumbai_400m/
-
-    
-        
-    '''

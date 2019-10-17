@@ -15,7 +15,7 @@ from __future__ import print_function
 from skimage.morphology import skeletonize, remove_small_objects, remove_small_holes
 import numpy as np
 from matplotlib.pylab import plt
-from other_tools import sknw, sknw_int64
+from utils import sknw, sknw_int64
 import os
 import pandas as pd
 from itertools import tee
@@ -33,12 +33,7 @@ import skimage.io
 import cv2
 
 from utils import make_logger
-
-#import sys
-#from scipy import ndimage as ndi
-#from functools import partial
-#from multiprocessing import Pool
-from json.config import Config
+from jsons.config import Config
 
 logger1 = None
 
@@ -132,12 +127,6 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
     # global thresh
     glob_thresh_arr = cv2.threshold(blur, glob_thresh, 1, cv2.THRESH_BINARY)[1]
     glob_thresh_arr_smooth = cv2.medianBlur(glob_thresh_arr, kernel_blur)
-
-    ## skimage
-    #block_size = 81
-    #mask_thresh = threshold_adaptive(mask, block_size, offset=10)
-    #mask_thresh= mask_thresh.astype(int)
-    #plt.imshow(mask_thresh)
     
     t1 = time.time()
     print ("Time to compute open(), close(), and get thresholds:", t1-t0, "seconds")
@@ -145,36 +134,12 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
     if use_glob_thresh:
         mask_thresh = glob_thresh_arr_smooth
     else:
-        # adaptive thresholding
-    #    Python: cv2.adaptiveThreshold(src, maxValue, adaptiveMethod, thresholdType, blockSize, C[, dst]) → dst
-    #    Parameters:
-    #    src – Source 8-bit single-channel image.
-    #    dst – Destination image of the same size and the same type as src .
-    #    maxValue – Non-zero value assigned to the pixels for which the condition is satisfied. See the details below.
-    #    adaptiveMethod – Adaptive thresholding algorithm to use, ADAPTIVE_THRESH_MEAN_C or ADAPTIVE_THRESH_GAUSSIAN_C . See the details below.
-    #    thresholdType – Thresholding type that must be either THRESH_BINARY or THRESH_BINARY_INV .
-    #    blockSize – Size of a pixel neighborhood that is used to calculate a threshold value for the pixel: 3, 5, 7, and so on.
-    #    C – Constant subtracted from the mean or weighted mean (see the details below). Normally, it is positive but may be zero or negative as well.
         adapt_thresh = cv2.adaptiveThreshold(mask,1,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
                     cv2.THRESH_BINARY,adapt_kernel, adapt_const)
-        #adapt_kernel = 501
-        #adapt_thresh = cv2.adaptiveThreshold(mask,150,cv2.ADAPTIVE_THRESH_MEAN_C,\
-        #            cv2.THRESH_BINARY,adapt_kernel,2)
         # resmooth
         adapt_thresh_smooth = cv2.medianBlur(adapt_thresh, kernel_blur)
 
         mask_thresh = adapt_thresh_smooth 
-
-    
-    ## background equalization
-    ## https://stackoverflow.com/questions/39231534/get-darker-lines-of-an-image-using-opencv
-    #max_value = np.max(mask)
-    #backgroundRemoved = mask.astype(float)
-    #bg_kern = 101
-    #blur_eq = cv2.GaussianBlur(backgroundRemoved, (bg_kern, bg_kern), 200)
-    #backgroundRemoved = backgroundRemoved/blur_eq
-    #backgroundRemoved = (backgroundRemoved*max_value/np.max(backgroundRemoved)).astype(np.uint8)
-    #closing_bg = cv2.morphologyEx(backgroundRemoved, cv2.MORPH_CLOSE, kernel_close)
     
     # opening and closing
     # http://docs.opencv.org/3.0-beta/doc/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
@@ -196,9 +161,6 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
                                             min_thresh=glob_thresh, 
                                            min_area=min_area, 
                                            contour_smoothing=contour_smoothing)
-        #contours, cont_plot = get_contours(opening, min_thresh=glob_thresh, 
-        #                                   min_area=min_area, 
-        #                                   contour_smoothing=contour_smoothing)
     
         # for some reason contours don't extend to the edge, so clip the edge
         # and resize
@@ -229,8 +191,6 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
     print ("Time to run dl_post_process_pred():", time.time() - t0, "seconds")
     
     return final_mask, medial_int
-
-
 
 
 ###############################################################################
@@ -302,6 +262,7 @@ def remove_duplicate_segments(seq):
     return res
 
 
+###############################################################################
 def flatten(l):
     return [item for sublist in l for item in sublist]
 
@@ -367,6 +328,7 @@ def preprocess(img, thresh, img_mult=255, hole_size=300,
 
     return img
 
+
 ###############################################################################
 def graph2lines(G):
     node_lines = []
@@ -390,6 +352,7 @@ def graph2lines(G):
         node_lines.append(current_line)
     return node_lines
 
+
 ###############################################################################
 def visualize(img, G, vertices):
     plt.imshow(img, cmap='gray')
@@ -412,9 +375,11 @@ def visualize(img, G, vertices):
     plt.title('Build Graph')
     plt.show()
 
+
 ###############################################################################
 def line_points_dist(line1, pts):
     return np.cross(line1[1] - line1[0], pts - line1[0]) / np.linalg.norm(line1[1] - line1[0])
+
 
 ###############################################################################
 def remove_small_terminal(G):
@@ -437,6 +402,7 @@ def remove_small_terminal(G):
             if e in terminal_points and val.get('weight', 0) < 10:
                 G.remove_node(e)
     return
+
 
 ###############################################################################
 def add_small_segments(G, terminal_points, terminal_lines, dist1=20, 
@@ -491,6 +457,7 @@ def add_small_segments(G, terminal_points, terminal_lines, dist1=20,
             wkt.append(linestring.format(line))
     return wkt
 
+
 ###############################################################################
 def add_direction_change_nodes(pts, s, e, s_coord, e_coord):
     if len(pts) > 3:
@@ -508,6 +475,7 @@ def add_direction_change_nodes(pts, s, e, s_coord, e_coord):
     else:
         ps = np.array([s_coord, e_coord], dtype=np.int32)
     return ps
+
 
 ###############################################################################
 def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
@@ -537,7 +505,6 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
     else:
         # ensure 8bit?
         img_tmp = skimage.io.imread(img_loc).astype(np.uint8)
-        #img_tmp = skimage.io.imread(img_loc)
         # we want skimage to read in (channels, h, w) for multi-channel
         #   assume less than 20 channels
         if img_tmp.shape[0] > 20: 
@@ -565,9 +532,6 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
         print ("Using only subset of data!!!!!!!!")
         print ("make_skeletion() new img.shape:", img.shape)
     ##########
-
-    #if len(img_shape) > 0:
-    #    assert img.shape == img_shape #(1300, 1300)
     
     if fix_borders:
         img = cv2.copyMakeBorder(img, replicate, replicate, replicate, 
@@ -612,12 +576,6 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
     t1 = time.time()
     print ("ske.shape:", ske.shape)
     print ("Time to run make_skeleton:", t1-t0, "seconds")
-    
-    #print ("make_skeletion(), ske.shape:", ske.shape)
-    #print ("make_skeletion(), ske.size:", ske.size)
-    #print ("make_skeletion(), ske dtype:", ske.dtype)
-    #print ("make_skeletion(), ske unique:", np.unique(ske))
-    #return
 
     return img, ske
 
@@ -648,10 +606,6 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
     # save to file
     if out_ske_file:
         cv2.imwrite(out_ske_file, ske.astype(np.uint8)*255)
-        ## write portion to file?
-        #out_ske_part = out_ske_file.split('.tif')[0] + '_part.tif'
-        #print ('out_ske_part_path', out_ske_part)
-        #cv2.imwrite(out_ske_part, ske[0:2000, 0:2000].astype(np.uint8)*220)
     
     # create graph
     print ("Execute sknw...")
@@ -674,13 +628,7 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
         # print an edge
         edge_tmp = list(G.edges())[-1]
         print ("random edge props for edge:", edge_tmp, " = ", 
-               G.edges[edge_tmp[0], edge_tmp[1], 0]) #G.edge[edge_tmp[0]][edge_tmp[1]])
-        #node_tmp = list(G.nodes())[np.random.randint(len(G.nodes()))]
-        #print (node_tmp, "G.node props:", G.nodes[node_tmp])
-        #edge_tmp = list(G.edges())[np.random.randint(len(G.edges()))]
-        #print (edge_tmp, "G.edge props:", G.edges(edge_tmp))
-        #print (edge_tmp, "G.edge props:", G.edges[edge_tmp[0]][edge_tmp[1]])
-    
+               G.edges[edge_tmp[0], edge_tmp[1], 0]) #G.edge[edge_tmp[0]][edge_tmp[1]])    
     
     print ("Clean out short subgraphs")
     if verbose:
@@ -778,6 +726,7 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
         return [linestring.format("EMPTY")]
     
     return wkt
+
 
 ###############################################################################
 def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3, #threshes={'2': .3, '3': .3, '4': .3, '5': .2}, 
@@ -899,33 +848,13 @@ def main():
         os.makedirs(out_gdir, exist_ok=True)
     else:
         out_gdir = ''
-     
-#    # use stitched dir if it has been populated
-#    if os.path.exists(config.stitched_dir_norm):
-#        im_dir = config.stitched_dir_norm
-#    else:
-#        im_dir = config.merged_dir
-#        # merged_dir = os.path.join(config.results_dir, config.folder + config.out_suff, 'merged')
-#     
-#    # outut files
-#    res_root_dir = config.results_dir #os.path.dirname(im_dir)
-#    outfile_csv = os.path.join(res_root_dir, 'merged_wkt_list.csv')
-#    #outfile_gpickle = os.path.join(res_root_dir, 'G_sknw.gpickle')
-#    out_ske_dir = os.path.join(res_root_dir, 'skeleton')  # set to '' to not save
-#    os.makedirs(out_ske_dir, exist_ok=True)
-#    out_gdir = os.path.join(res_root_dir, 'sknw_gpickle')  # set to '' to not save
-#    os.makedirs(out_gdir, exist_ok=True)
-    
+         
     print ("im_dir:", im_dir)
     print ("out_ske_dir:", out_ske_dir)
     print ("out_gdir:", out_gdir)
         
     thresh = config.skeleton_thresh
-#    # thresholds for each aoi
-#    threshes={'2': .3, '3': .3, '4': .3, '5': .2}  
-#    thresh = threshes[config.aoi]
     min_subgraph_length_pix = config.min_subgraph_length_pix
-    #min_subgraph_length_pix=200
     
     debug=False
     add_small=True
@@ -941,29 +870,6 @@ def main():
     #max_out_size=(8003, 16009)   # works fine
     max_out_size=(2000000, 2000000)
  
-#    ###############################################################################
-#    # https://docs.python.org/3/howto/logging-cookbook.html#logging-to-multiple-destinations
-#    # set up logging to file - see previous section for more details
-#    res_root_dir = os.path.join(config.path_results_root, config.test_results_dir)
-#    log_file = os.path.join(res_root_dir, 'skeleton.log')
-#    logging.basicConfig(level=logging.DEBUG,
-#                        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-#                        datefmt='%m-%d %H:%M',
-#                        filename=log_file,
-#                        filemode='w')
-#    # define a Handler which writes INFO messages or higher to the sys.stderr
-#    console = logging.StreamHandler()
-#    console.setLevel(logging.INFO)
-#    # set a format which is simpler for console use
-#    formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    #formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
-#    # tell the handler to use this format
-#    console.setFormatter(formatter)
-#    # add the handler to the root logger
-#    logging.getLogger('').addHandler(console)
-#    logger1 = logging.getLogger('log')
-#    logger1.info("log file: {x}".format(x=log_file))
-#    ###############################################################################  
     log_file = os.path.join(res_root_dir, 'skeleton.log')
     console, logger1 = make_logger.make_logger(log_file, logger_name='log')
    
