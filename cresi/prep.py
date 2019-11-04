@@ -29,7 +29,7 @@ geojson_dirs_train = [
         '/data/SN5_roads/train/AOI_8_Mumbai/geojson_roads_speed/'
         ]
 
-im_dir_test_root = ['/data/SN5_roads/test_private']
+im_dir_test_root = '/data/SN5_roads/test_private'
 
 
 # outputs (train)
@@ -43,13 +43,14 @@ os.makedirs(speed_mask_multidim_dir)
 
 # outputs (test)
 eightbit_im_dir_test = '/home/ubuntu/data/cresi_data/test/8bit/PS-RGB'
+os.makedirs(eightbit_im_dir_test)
 #######################
 
 #######################
 # 0. Data Prep for Training
 
 #######################
-# Build 8bit images from 16bit SpaceNet images
+# Build 8bit training images from 16bit SpaceNet images
 for im_dir in im_dirs_train:
     cmd = 'python ' \
           + os.path.join(path_cresi, 'data_prep/create_8bit_images.py') \
@@ -81,11 +82,11 @@ for im_dir, geojson_dir in zip(im_dirs_train, geojson_dirs_train):
 # 1. Data Prep for Testing
 
 #######################
-# Build 8bit images from 16bit SpaceNet images
+# Build 8bit test images from 16bit SpaceNet images
 im_dirs_test_part = [z for z in os.listdir(im_dir_test_root)
                      if z.startswith('AOI')]
 for im_dir_part in im_dirs_test_part:
-    im_dir = os.path.join(im_dir_test_root, im_dir_part)
+    im_dir = os.path.join(im_dir_test_root, im_dir_part, 'PS-MS')
     cmd = 'python ' \
           + os.path.join(path_cresi, 'data_prep/create_8bit_images.py') + ' ' \
           + '--indir=' + im_dir + ' ' \
