@@ -4,7 +4,7 @@
     "path_data_root": "/home/ubuntu/data/cresi_data/",
     "train_data_refined_dir_ims": "/home/ubuntu/data/cresi_data/train/8bit/PS-RGB",
     "train_data_refined_dir_masks": "/home/ubuntu/data/cresi_data/train/train_mask_binned_mc",
-	"speed_conversion_file": "/home/ubuntu/data/cresi_data/SN5_roads_train_speed_conversion_binned.csv"
+	"speed_conversion_file": "/home/ubuntu/data/cresi_data/SN5_roads_train_speed_conversion_binned.csv",
     "folds_file_name": "folds4.csv",
     "save_weights_dir": "sn5_baseline",
     "num_folds": 1,
