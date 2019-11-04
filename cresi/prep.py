@@ -9,7 +9,7 @@ Created on Wed Oct 30 12:36:51 2019
 import os
 
 #######################
-path_cresi = '/path/to/cresi/cresi/'
+path_cresi = '/home/ubuntu/src/cresi/cresi/'
 
 im_dirs_train = [
         '/data/SN3_roads/train/AOI_2_Vegas/PS-MS/',
@@ -31,14 +31,18 @@ geojson_dirs_train = [
 
 im_dir_test_root = ['/data/SN5_roads/test_private']
 
+
 # outputs (train)
-eightbit_im_dir = '/data/cresi_data/train/8bit/PS-RGB'
-output_conversion_csv = '/data/cresi_data/SN5_roads_train_speed_conversion_binned.csv'
-speed_mask_dir = '/data/cresi_data/train/train_mask_binned'
-speed_mask_multidim_dir = '/data/cresi_data/train/train_mask_binned_mc'
+eightbit_im_dir = '/home/ubuntu/data/cresi_data/train/8bit/PS-RGB'
+output_conversion_csv = '/home/ubuntu/data/cresi_data/SN5_roads_train_speed_conversion_binned.csv'
+speed_mask_dir = '/home/ubuntu/data/cresi_data/train/train_mask_binned'
+speed_mask_multidim_dir = '/home/ubuntu/data/cresi_data/train/train_mask_binned_mc'
+os.makedirs(eightbit_im_dir)
+os.makedirs(speed_mask_dir)
+os.makedirs(speed_mask_multidim_dir)
 
 # outputs (test)
-eightbit_im_dir_test = '/data/cresi_data/test/8bit/PS-RGB'
+eightbit_im_dir_test = '/home/ubuntu/data/cresi_data/test/8bit/PS-RGB'
 #######################
 
 #######################
@@ -48,12 +52,13 @@ eightbit_im_dir_test = '/data/cresi_data/test/8bit/PS-RGB'
 # Build 8bit images from 16bit SpaceNet images
 for im_dir in im_dirs_train:
     cmd = 'python ' \
-          + os.path.join(path_cresi, 'data_prep/create_8bit_images.py') + ' ' \
-          + '—indir=' + im_dir + ' ' \
-          + '-outdir=' + eightbit_im_dir + ' ' \
-          + '—rescale_type=perc' + ' ' \
-          + '—percentiles=2,98' + ' ' \
-          + '—band_order=5,3,2'
+          + os.path.join(path_cresi, 'data_prep/create_8bit_images.py') \
+          + ' --indir=' + im_dir \
+          + ' --outdir=' + eightbit_im_dir \
+          + ' --rescale_type=perc' \
+          + ' --percentiles=2,98'\
+          + ' --band_order=5,3,2'
+    print(repr(cmd))
     print("images to 8bit cmd:", cmd)
     os.system(cmd)
 
@@ -62,11 +67,11 @@ for im_dir in im_dirs_train:
 for im_dir, geojson_dir in zip(im_dirs_train, geojson_dirs_train):
     cmd = 'python ' \
           + os.path.join(path_cresi, 'data_prep/speed_masks.py') + ' ' \
-          + '—geojson_dir=' + geojson_dir + ' ' \
-          + '-image_dir=' + im_dir + ' ' \
-          + '-output_conversion_csv=' + output_conversion_csv + ' ' \
-          + '-output_mask_dir=' + speed_mask_dir + ' ' \
-          + '-output_mask_multidim_dir=' + speed_mask_multidim_dir
+          + '--geojson_dir=' + geojson_dir + ' ' \
+          + '--image_dir=' + im_dir + ' ' \
+          + '--output_conversion_csv=' + output_conversion_csv + ' ' \
+          + '--output_mask_dir=' + speed_mask_dir + ' ' \
+          + '--output_mask_multidim_dir=' + speed_mask_multidim_dir
 
     print("speed mask cmd:", cmd)
     os.system(cmd)
@@ -83,10 +88,10 @@ for im_dir_part in im_dirs_test_part:
     im_dir = os.path.join(im_dir_test_root, im_dir_part)
     cmd = 'python ' \
           + os.path.join(path_cresi, 'data_prep/create_8bit_images.py') + ' ' \
-          + '—indir=' + im_dir + ' ' \
-          + '-outdir=' + eightbit_im_dir_test + ' ' \
-          + '—rescale_type=perc' + ' ' \
-          + '—percentiles=2,98' + ' ' \
-          + '—band_order=5,3,2'
+          + '--indir=' + im_dir + ' ' \
+          + '--outdir=' + eightbit_im_dir_test + ' ' \
+          + '--rescale_type=perc' + ' ' \
+          + '--percentiles=2,98' + ' ' \
+          + '--band_order=5,3,2'
     print("test images to 8bit cmd:", cmd)
     os.system(cmd)

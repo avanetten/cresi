@@ -1,10 +1,10 @@
 {
-    "path_src": "/src/cresi/cresi",
-    "path_results_root": "/src/cresi/results",
-    "path_data_root": "/data/cresi_data/",
-    "train_data_refined_dir_ims": "/data/cresi_data/train/8bit/PS-RGB",
-    "train_data_refined_dir_masks": "/data/cresi_data/train/train_mask_binned_mc",
-	"speed_conversion_file:" "/data/cresi_data/cresi_train/SN5_roads_train_speed_conversion_binned.csv"
+    "path_src": "/home/ubuntu/src/cresi/cresi",
+    "path_results_root": "/home/ubuntu/src/cresi/results",
+    "path_data_root": "/home/ubuntu/data/cresi_data/",
+    "train_data_refined_dir_ims": "/home/ubuntu/data/cresi_data/train/8bit/PS-RGB",
+    "train_data_refined_dir_masks": "/home/ubuntu/data/cresi_data/train/train_mask_binned_mc",
+	"speed_conversion_file:" "/home/ubuntu/data/cresi_data/SN5_roads_train_speed_conversion_binned.csv"
     "folds_file_name": "folds4.csv",
     "save_weights_dir": "sn5_baseline",
     "num_folds": 1,
@@ -16,7 +16,7 @@
     "early_stopper_patience": 5,
     "nb_epoch": 50,
 
-    "test_data_refined_dir": "/data/cresi_data/test/8bit/PS-RGB",
+    "test_data_refined_dir": "/home/ubuntu/data/cresi_data/test/8bit/PS-RGB",
     "test_results_dir": "sn5_baseline",    
     "folds_save_dir": "folds",
     "tile_df_csv": "tile_df.csv",  
