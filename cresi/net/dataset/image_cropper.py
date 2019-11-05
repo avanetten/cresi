@@ -88,13 +88,14 @@ def starts_to_mpl(starts, t):
 
     return data
 
-def calc_starts_and_visualize(c, tr, tc):
+def calc_starts_and_visualize(c, tr, tc, verbose=False):
     starts_rows = c.sequential_starts(axis=0)
     data_rows = starts_to_mpl(starts_rows, tr)
     starts_cols = c.sequential_starts(axis=1)
     data_cols = starts_to_mpl(starts_cols, tc)
-    print(starts_rows)
-    print(starts_cols)
+    if verbose:
+        print(starts_rows)
+        print(starts_cols)
 
     f, axarr = plt.subplots(1, 2, sharey=True)
     axarr[0].plot(*data_rows)

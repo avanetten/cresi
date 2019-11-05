@@ -16,7 +16,7 @@ from typing import Type
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from dataset.neural_dataset import TrainDataset, ValDataset
-from .loss import dice_round, dice, focal, focal_cannab, soft_dice_loss, \
+from .loss import dice_round, dice, focal_v0, focal, soft_dice_loss, \
     weight_reshape
 from .callbacks import EarlyStopper, ModelSaver, TensorBoard, \
     CheckpointSaver, Callbacks, LRDropCheckpointSaver, ModelFreezer
@@ -122,13 +122,13 @@ class Estimator:
 
         # custom loss function
         # AVE edit
-        if 'focal' in self.config.loss.keys():
-            loss = (self.config.loss['focal'] * focal_l + self.config.loss['dice'] * (1 - d) ) / iter_size
+        if 'focal_v0' in self.config.loss.keys():
+            loss = (self.config.loss['focal_v0'] * focal_v0(output, target) + self.config.loss['dice'] * (1 - d) ) / iter_size
         elif 'bce' in self.config.loss.keys():
             loss = (self.config.loss['bce'] * bce + self.config.loss['dice'] * (1 - d)) / iter_size
-        elif 'focal_cannab' in self.config.loss.keys():
-            focal_l = focal_cannab(output, target)
-            loss = (self.config.loss['focal_cannab'] * focal_l + self.config.loss['soft_dice'] * dice_soft_l) / iter_size
+        elif 'focal' in self.config.loss.keys():
+            focal_l = focal(output, target)
+            loss = (self.config.loss['focal'] * focal_l + self.config.loss['soft_dice'] * dice_soft_l) / iter_size
         elif 'smooth_l1' in self.config.loss.keys():
             loss = (self.config.loss['smooth_l1'] * smooth_l1_l + self.config.loss['dice'] * (1 - d)) / iter_size
         elif 'mse' in self.config.loss.keys():
@@ -158,8 +158,8 @@ class Estimator:
         iter_size = self.iter_size
         
         if verbose:
-            print ("images.shape:", images.shape)
-            print ("ytrues.shape:", ytrues.shape)
+            print("images.shape:", images.shape)
+            print("ytrues.shape:", ytrues.shape)
         
         if training:
             self.optimizer.zero_grad()
@@ -219,13 +219,14 @@ class PytorchTrain:
         #print ("pytorch_utils.train.py PyTorchTrain test1")
 
 
-    def _run_one_epoch(self, epoch, loader, training=True):
+    def _run_one_epoch(self, epoch, loader, training=True, verbose=False):
         avg_meter = defaultdict(float)
         
         #print ("Sometimes a problem in pytorch_utils.train.py _run_one_epoch()" \
         #       + " this is caused by image_cropper if target_cols is too large")
-        print ("epoch:", epoch)
-        print ("len(loader):", len(loader))
+        if verbose:
+            print("epoch:", epoch)
+            print ("len(loader):", len(loader))
         #print ("loader:", loader)
             
         pbar = tqdm(enumerate(loader), total=len(loader), desc="Fold {}; Epoch {}{}".format(self.fold, epoch, ' eval' if not training else ""), ncols=0)
@@ -278,7 +279,7 @@ class PytorchTrain:
             self.metrics_collection.val_metrics = self._run_one_epoch(epoch, val_loader, training=False)
             # print("pytorch_utils.train.py.fit() checkpoint2")
             t1 = time.time()
-            print ("Total time elapsed:", (t1 - t0)/60., "minutes")
+            print("Total time elapsed:", (t1 - t0)/60., "minutes")
 
             self.callbacks.on_epoch_end(epoch)
 
@@ -299,10 +300,10 @@ def train(ds, fold, train_idx, val_idx, config, save_path, log_path,
         logger.info("pytorch_utils train.py config.num_channels: {}".format(config.num_channels))
         logger.info("pytorch_utils train.py function train(),  model: {}".format(model))
     else:
-        print ("pytorch_utils train.py config.num_channels:", config.num_channels)
+        print("pytorch_utils train.py config.num_channels:", config.num_channels)
         print ("pytorch_utils train.py function train(),  model:", model)
     estimator = Estimator(model, optimizers[config.optimizer], save_path, config=config)
-    #print ("pytorch_utils train.py estimator:", estimator)
+    #print("pytorch_utils train.py estimator:", estimator)
 
     estimator.lr_scheduler = MultiStepLR(estimator.optimizer, config.lr_steps, gamma=config.lr_gamma)
     callbacks = [

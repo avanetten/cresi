@@ -126,14 +126,14 @@ class Evaluator:
         pbar = tqdm.tqdm(val_dl, total=len(val_dl))
         #print ("tqdm pbar:", pbar)
         for data in pbar:
-            #print ("pbar data:", data)
-            print("data['image'].shape:", data['image'].shape)
+            # print ("pbar data:", data)
             samples = torch.autograd.Variable(data['image'], volatile=True).cuda()
             predicted = predict(model, samples, flips=self.flips)
             if verbose:
                 print("  eval.py -  - Evaluator - predict() - len samples:", len(samples))
                 print("  eval.py - Evaluator - predict()- samples.shape:", samples.shape)
                 print("  eval.py - Evaluator - predict() - predicted.shape:", predicted.shape)
+                print("  eval.py - Evaluator - predict() - data['image'].shape:", data['image'].shape)
                 # print("  eval.py - Evaluator - predict() - torchsummary.summary(model, (4, 3, 1344, 1344):", torchsummary.summary(model, samples.shape))
 
             self.process_batch(predicted, model, data, prefix=prefix)
