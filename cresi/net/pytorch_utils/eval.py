@@ -17,6 +17,7 @@ from torch.utils.data.dataloader import DataLoader as PytorchDataLoader
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from dataset.neural_dataset import SequentialDataset
 
+device = torch.device("cuda")
 
 class flip:
     FLIP_NONE=0
@@ -73,6 +74,8 @@ def read_model(path_model_weights, fold):
         warnings.simplefilter('ignore', SourceChangeWarning)
         
         model = torch.load(os.path.join(path_model_weights, 'fold{}_best.pth'.format(fold)))
+        model.to(device)
+
         #model = torch.load(os.path.join(config.path_model_weights, 'fold{}_best.pth'.format(fold)))
         
         #model = torch.load(os.path.join(config.results_dir, 'weights', config.folder, 'fold{}_best.pth'.format(fold)))
