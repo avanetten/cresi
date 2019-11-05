@@ -139,18 +139,27 @@ class Estimator:
         if training:
             loss.backward()
 
-        meter['tot_loss'] += loss.data.cpu().numpy()[0]
+        meter['tot_loss'] += loss.data.cpu().numpy()
+        # meter['tot_loss'] += loss.data.cpu().numpy()[0]
+        
         #meter['bce'] += bce.data.cpu().numpy()[0] / iter_size
-        meter['focal'] += focal_l.data.cpu().numpy()[0] / iter_size
+        
+        meter['focal'] += focal_l.data.cpu().numpy() / iter_size
+        # meter['focal'] += focal_l.data.cpu().numpy()[0] / iter_size
 
         #meter['ce'] += ce.data.cpu().numpy()[0] / iter_size
         #meter['dice_round'] += dice_r.data.cpu().numpy()[0] / iter_size
         # meter['jr'] += jacc_r.data.cpu().numpy()[0] / iter_size
         # meter['jacc'] += jacc.data.cpu().numpy()[0] / iter_size
         #meter['dice'] += d.data.cpu().numpy()[0] / iter_size
-        meter['dice_loss'] += dice_l.data.cpu().numpy()[0] / iter_size
-        meter['smooth_l1'] += smooth_l1_l.data.cpu().numpy()[0] / iter_size
-        meter['mse'] += mse_l.data.cpu().numpy()[0] / iter_size
+        
+        meter['dice_loss'] += dice_l.data.cpu().numpy() / iter_size
+        # meter['dice_loss'] += dice_l.data.cpu().numpy()[0] / iter_size
+
+        # meter['smooth_l1'] += smooth_l1_l.data.cpu().numpy()[0] / iter_size
+
+        meter['mse'] += mse_l.data.cpu().numpy() / iter_size
+        # meter['mse'] += mse_l.data.cpu().numpy()[0] / iter_size
         
         return meter
 
