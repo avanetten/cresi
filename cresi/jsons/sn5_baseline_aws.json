@@ -44,7 +44,7 @@
     "padding": 22,
     "eval_rows": 1344,
     "eval_cols": 1344,
-    "batch_size": 11,
+    "batch_size": 16,
     "iter_size": 1,
     "lr": 0.0001,
     "lr_steps": [20, 25],
