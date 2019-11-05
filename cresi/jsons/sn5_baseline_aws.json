@@ -51,7 +51,7 @@
     "lr_gamma": 0.2,
     "test_pad": 64,
     "epoch_size": 8,
-    "predict_batch_size": 4,
+    "predict_batch_size": 2,
     "target_cols": 512,
     "target_rows": 512,
     "optimizer": "adam",
