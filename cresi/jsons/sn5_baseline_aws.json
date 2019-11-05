@@ -6,7 +6,7 @@
     "train_data_refined_dir_masks": "/home/ubuntu/data/cresi_data/train/train_mask_binned_mc",
 	"speed_conversion_file": "/home/ubuntu/data/cresi_data/SN5_roads_train_speed_conversion_binned.csv",
     "folds_file_name": "folds4.csv",
-    "save_weights_dir": "sn5_baseline",
+    "save_weights_dir": "sn5_baseline_aws",
     "num_folds": 1,
     "default_val_perc": 0.20,
     "num_channels": 3,
@@ -17,7 +17,7 @@
     "nb_epoch": 50,
 
     "test_data_refined_dir": "/home/ubuntu/data/cresi_data/test/8bit/PS-RGB",
-    "test_results_dir": "sn5_baseline",    
+    "test_results_dir": "sn5_baseline_aws",    
     "folds_save_dir": "folds",
     "tile_df_csv": "tile_df.csv",  
     "test_sliced_dir": "",
