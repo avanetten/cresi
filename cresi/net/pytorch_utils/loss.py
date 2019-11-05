@@ -81,7 +81,8 @@ def soft_dice_loss(outputs, targets, per_image=False):
     From cannab sn4
     '''
     
-    batch_size = outputs.size()[0]
+    batch_size = outputs.size()
+    # batch_size = outputs.size()[0]
     eps = 1e-5
     if not per_image:
         batch_size = 1
