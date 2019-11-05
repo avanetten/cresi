@@ -41,9 +41,13 @@ def to_numpy(batch):
 
 
 def predict(model, batch, flips=flip.FLIP_NONE, verbose=False):
+    
     #print ("run eval.predict()...")
     # predict with tta on gpu
-    pred1 = F.sigmoid(model(batch))
+    # pred1 = F.sigmoid(model(batch))
+    with torch.no_grad():
+        pred1 = F.sigmoid(model(batch))
+
     if verbose:
         print("  eval.py - predict() - batch.shape:", batch.shape)
         print("  eval.py - predict() - pred1.shape:", pred1.shape)
