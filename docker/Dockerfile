@@ -125,7 +125,10 @@ RUN conda install -n cresi \
 	&& conda clean --yes --all
 	
 # update pytorch?
-conda install -n cresi pytorch torchvision cuda90 -c pytorch
+RUN conda install -n cresi pytorch torchvision cuda90 -c pytorch \
+	&& conda clean -p \
+	&& conda clean -t \
+	&& conda clean --yes --all
 	
 ENV LD_LIBRARY_PATH /miniconda/lib:${LD_LIBRARY_PATH}
 RUN apt install -y libgl1-mesa-glx
