@@ -6,13 +6,15 @@ import cv2
 import skimage.io
 import shutil
 import time
-from jsons.config import Config
+from configs.config import Config
 from utils import make_logger
 from utils.save_array_gdal import CreateMultiBandGeoTiff
 
 # skimage gives really annoying warnings
 import warnings
 warnings.filterwarnings("ignore")
+#with warnings.catch_warnings():
+#    warnings.simplefilter("ignore")
 
 
 ############
@@ -22,8 +24,39 @@ from tqdm import tqdm
 tqdm.monitor_interval = 0
 ############
 
+
+##############################################################################
 def merge_tiffs(root, out_dir, out_dir_gdal=None, num_classes=1, 
-                verbose=False):
+                verbose=True):
+
+    '''
+    Surprisingly, merge_tiffs works fine with multichannel, e.g.:
+    # explore taking mean of multiple images (relates to merge_preds.py)
+    import numpy as np
+    
+    # set first channel of a to 5, rest to 0
+    a = np.zeros((7,20,20))
+    a[0,:,:] = 5
+    # set b as ones
+    b = np.ones((7,20,20))
+    # set c as 3, except set 7th channel as -10
+    c = 3 * np.ones((7,20,20))
+    c[6,:,:] = -10
+    
+    probs = []
+    for prob_arr in [a,b,c]:
+        print ("prob_arr.shape:", prob_arr.shape)
+        probs.append(prob_arr)
+    prob_arr = np.mean(probs, axis=0)
+    print ("prob_arr.shape:", prob_arr.shape)
+    # first channel should be mean of (5, 1, 3) = 3
+    print ("prob_arr[0,:,:]:", prob_arr[0,:,:])
+    # third channel should be mean of (0, 1, 3)
+    print ("prob_arr[3,:,:]:", prob_arr[3,:,:])
+    # 7th channel should be mean of (0, 1, -10) = -3
+    print ("prob_arr[6,:,:]:", prob_arr[6,:,:])
+    #print ("prob_arr:", prob_arr)
+    '''
     
     prob_files = {f for f in os.listdir(root) if os.path.splitext(f)[1] in ['.tif', '.tiff']}
     print ("prob_files:", prob_files)
@@ -68,13 +101,19 @@ def merge_tiffs(root, out_dir, out_dir_gdal=None, num_classes=1,
         if num_classes == 1 or num_classes == 3:
             cv2.imwrite(res_path_geo, prob_arr_mean)
         else:
-            
-            # skimage is slow, 
-            skimage.io.imsave(res_path_geo, prob_arr_mean, compress=1)
+            # skimage reads in (channels, h, w) for multi-channel
+            # assume less than 20 channels
+            #print ("mask_channels.shape:", mask_channels.shape)
+            if prob_arr_mean.shape[0] > 20: 
+                #print ("mask_channels.shape:", mask_channels.shape)
+                prob_arr_mean_skimage = np.moveaxis(prob_arr_mean, -1, 0)
+            else:
+                prob_arr_mean_skimage = prob_arr_mean
+            skimage.io.imsave(res_path_geo, prob_arr_mean_skimage, compress=1)
             
             # save gdal too?
             if out_dir_gdal:
-                outpath_gdal = os.path.join(out_dir, prob_file)
+                outpath_gdal = os.path.join(out_dir_gdal, prob_file)
                 #outpath_gdal = os.path.join(out_dir_gdal, prob_file)
                 # want chabnnels first
                 # assume less than 20 channels
@@ -87,6 +126,7 @@ def merge_tiffs(root, out_dir, out_dir_gdal=None, num_classes=1,
                 CreateMultiBandGeoTiff(outpath_gdal, mask_gdal)
 
 
+##############################################################################
 def merge_tiffs_defferent_folders(roots, res):
     '''Need to update to handle multiple bands!'''
     os.makedirs(os.path.join(res), exist_ok=True)
@@ -104,8 +144,31 @@ def merge_tiffs_defferent_folders(roots, res):
         cv2.imwrite(res_path_geo, prob_arr)
 
 
+##############################################################################
 def execute():
 
+    # # if using argparse
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--folds_save_dir', type=str, default='/raid/local/src/apls/albu_inference_mod/results',
+    #                         help="path to predicted folds")
+    # parser.add_argument('--out_dir', type=str, default='/raid/local/src/apls/albu_inference_mod/results',
+    #                         help="path to merged predictions")
+    # args = parser.parse_args()
+    # #out_dir = os.path.join(os.path.dirname(root), 'merged')
+    # os.makedirs(args.out_dir, exist_ok=True)  #os.path.join(root, 'merged'), exist_ok=True)
+    
+    # t0 = time.time()
+    # merge_tiffs(args.folds_save_dir, args.out_dir)
+    # t1 = time.time()
+    # print ("Time to merge", len(os.listdir(args.folds_save_dir)), "files:", t1-t0, "seconds")
+    
+    # # compress original folds
+    # output_filename = args.folds_save_dir
+    # print ("output_filename:", output_filename)
+    # shutil.make_archive(output_filename, 'gztar', args.folds_save_dir) #'zip', res_dir)
+    # # remove folds
+    # #shutil.rmtree(args.folds_save_dir, ignore_errors=True)
+    
     # if using config instead of argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('config_path')
@@ -113,6 +176,8 @@ def execute():
     with open(args.config_path, 'r') as f:
         cfg = json.load(f)
         config = Config(**cfg)
+    verbose = False
+
         
     # nothing to do if only one fold
     if config.num_folds == 1:
@@ -126,7 +191,6 @@ def execute():
     merge_dir_gdal = merge_dir + '_gdal'
     #merge_dir_gdal = None
 
-    verbose = False
     #res_dir = config.folds_save_dir
     #res_dir = os.path.join(config.results_dir, config.folder + config.out_suff + '/folds')
     print ("folds_save_dir used in merge_preds():", folds_dir)
@@ -156,7 +220,7 @@ def execute():
     shutil.make_archive(output_filename, 'gztar', folds_dir) #'zip', res_dir)
     # remove folds
     shutil.rmtree(folds_dir, ignore_errors=True)
-
+    
     print ("Compress original gdal folds...")
     output_filename = folds_dir  + '_gdal'
     if os.path.exists(output_filename):
@@ -167,5 +231,6 @@ def execute():
         shutil.rmtree(folds_dir + '_gdal', ignore_errors=True)
 
 
+##############################################################################
 if __name__ == "__main__":
     execute()

@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 from pytorch_zoo import resnet
+from pytorch_zoo import senet
 
 
 encoder_params = {
@@ -10,6 +11,14 @@ encoder_params = {
         {'filters': [64, 64, 128, 256, 512],
          'init_op': resnet.resnet34,
          'url': resnet.model_urls['resnet34']},
+    'resnet50':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': resnet.resnet50,
+         'url': resnet.model_urls['resnet50']},
+    'resnet101':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': resnet.resnet101,
+         'url': resnet.model_urls['resnet101']},
 #    'resnet34_3channel':
 #        {'filters': [64, 64, 128, 256, 512],
 #         'init_op': resnet.resnet34(num_channels=3),
@@ -17,7 +26,28 @@ encoder_params = {
 #    'resnet34_8channel':
 #        {'filters': [64, 64, 128, 256, 512],
 #         'init_op': resnet.resnet34(num_channels=6)}
+    'se_resnet50':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': senet.se_resnet50,
+         'url': senet.model_urls['se_resnet50']},
+    'se_resnet101':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': senet.se_resnet101,
+         'url': senet.model_urls['se_resnet101']},
+    'se_resnet152':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': senet.se_resnet152,
+         'url': senet.model_urls['se_resnet152']},
+    'se_resnext50_32x4d':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': senet.se_resnext50_32x4d,
+         'url': senet.model_urls['se_resnext50_32x4d']},
+    'se_resnext101_32x4d':
+        {'filters': [64, 256, 512, 1024, 2048],
+         'init_op': senet.se_resnext101_32x4d,
+         'url': senet.model_urls['se_resnext101_32x4d']},
 }
+
 
 class ConvBottleneck(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -75,8 +105,10 @@ class AbstractModel(nn.Module):
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model.load_state_dict(pretrained_dict)
 
+
 def _get_layers_params(layers):
     return sum((list(l.parameters()) for l in layers), [])
+
 
 class EncoderDecoder(AbstractModel):
     def __init__(self, num_classes, num_channels=3, encoder_name='resnet34'):

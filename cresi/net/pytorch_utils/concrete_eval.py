@@ -70,22 +70,6 @@ class FullImageEvaluator(Evaluator):
                 os.makedirs(save_dir_gdal, exist_ok=True)
                 CreateMultiBandGeoTiff(os.path.join(save_dir_gdal, prefix + name), (mask * 255).astype(np.uint8))
               
-            ## try saving with gdal first
-            #CreateMultiBandGeoTiff(os.path.join(self.save_dir, prefix + name), (mask * 255).astype(np.uint8))
-            #if save_im_gdal_format:
-            #    # save with skimage too
-            #    save_dir_skimage = os.path.join(self.save_dir + '_skimage')
-            #    os.makedirs(save_dir_skimage, exist_ok=True)
-            #    outfile_sk = os.path.join(save_dir_skimage, prefix + name)
-            #    #name_part, ext = name.split('.')
-            #    #outfile = os.path.join(self.save_dir, prefix + name_part + '_skimage.' + ext)
-            #    if verbose:
-            #        print ("name:", name)
-            #        print ("mask.shape:", mask.shape)
-            #        print ("prediction.shape:", prediction.shape)
-            #        print ("outfile_sk:", outfile_sk)
-            #    skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8), 
-            #                      compress=4)
 
 class CropEvaluator(Evaluator):
     def __init__(self, *args, **kwargs):
@@ -171,19 +155,3 @@ class CropEvaluator(Evaluator):
                 os.makedirs(save_dir_gdal, exist_ok=True)
                 CreateMultiBandGeoTiff(os.path.join(save_dir_gdal, prefix + name), (mask * 255).astype(np.uint8))
               
-            ## try saving with gdal first
-            #CreateMultiBandGeoTiff(os.path.join(self.save_dir, prefix + name), (mask * 255).astype(np.uint8))
-            #if save_im_gdal_format:
-            #    # save with skimage too
-            #    save_dir_skimage = os.path.join(self.save_dir + '_skimage')
-            #    os.makedirs(save_dir_skimage, exist_ok=True)
-            #    outfile_sk = os.path.join(save_dir_skimage, prefix + name)
-            #    #name_part, ext = name.split('.')
-            #    #outfile = os.path.join(self.save_dir, prefix + name_part + '_skimage.' + ext)
-            #    if verbose:
-            #        print ("name:", name)
-            #        print ("mask.shape:", mask.shape)
-            #        print ("prediction.shape:", prediction.shape)
-            #        print ("outfile_sk:", outfile_sk)
-            #    skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8), 
-            #                      compress=4)

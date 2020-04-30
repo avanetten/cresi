@@ -5,15 +5,15 @@ Created on Sun May  6 08:51:36 2018
 
 @author: avanetten
 
-heavily modified version of:
+Inspired by:
     https://github.com/SpaceNetChallenge/RoadDetector/blob/master/albu-solution/src/skeleton.py
 """
 
-
-from __future__ import print_function
-
 from skimage.morphology import skeletonize, remove_small_objects, remove_small_holes
+from skimage.morphology import erosion, dilation, opening, closing, disk
+from skimage.feature import blob_dog, blob_log, blob_doh
 import numpy as np
+from scipy import ndimage as ndi
 from matplotlib.pylab import plt
 from utils import sknw, sknw_int64
 import os
@@ -27,17 +27,21 @@ import random
 import argparse
 import networkx as nx
 import logging
-
-# cv2 can't load large files, so need to import skimage too
+from multiprocessing.pool import Pool
+import skimage
+import skimage.draw
+import scipy.spatial
 import skimage.io 
 import cv2
 
-from utils import make_logger
-from jsons.config import Config
+from utils import make_logger, medial_axis_weight
+from configs.config import Config
+wkt_to_G = __import__('05_wkt_to_G')
 
 logger1 = None
-
 linestring = "LINESTRING {}"
+
+
 
 # from apls.py
 ###############################################################################
@@ -51,16 +55,25 @@ def clean_sub_graphs(G_, min_length=150, max_nodes_to_skip=100,
     if len(G_.nodes()) == 0:
         return G_
     
-    print ("Running clean_sub_graphs...")
-    sub_graphs = list(nx.connected_component_subgraphs(G_))
+    if verbose:
+        print("Running clean_sub_graphs...")
+    try:
+        sub_graphs = list(nx.connected_component_subgraphs(G_))
+    except:
+        sub_graph_nodes = nx.connected_components(G_)
+        sub_graphs = [G_.subgraph(c).copy() for c in sub_graph_nodes]
+    
+    if verbose:
+        print("  N sub_graphs:", len([z.nodes for z in sub_graphs]))
+        
     bad_nodes = []
     if verbose:
-        print (" len(G_.nodes()):", len(G_.nodes()) )
-        print (" len(G_.edges()):", len(G_.edges()) )
+        print(" len(G_.nodes()):", len(G_.nodes()) )
+        print(" len(G_.edges()):", len(G_.edges()) )
     if super_verbose:
-        print ("G_.nodes:", G_.nodes())
+        print("G_.nodes:", G_.nodes())
         edge_tmp = G_.edges()[np.random.randint(len(G_.edges()))]
-        print (edge_tmp, "G.edge props:", G_.edge[edge_tmp[0]][edge_tmp[1]])
+        print(edge_tmp, "G.edge props:", G_.edge[edge_tmp[0]][edge_tmp[1]])
 
     for G_sub in sub_graphs:
         # don't check length if too many nodes in subgraph
@@ -70,8 +83,8 @@ def clean_sub_graphs(G_, min_length=150, max_nodes_to_skip=100,
         else:
             all_lengths = dict(nx.all_pairs_dijkstra_path_length(G_sub, weight=weight))
             if super_verbose:
-                        print ("  \nGs.nodes:", G_sub.nodes() )
-                        print ("  all_lengths:", all_lengths )
+                print("  \nGs.nodes:", G_sub.nodes() )
+                print("  all_lengths:", all_lengths )
             # get all lenghts
             lens = []
             #for u,v in all_lengths.iteritems():
@@ -82,25 +95,25 @@ def clean_sub_graphs(G_, min_length=150, max_nodes_to_skip=100,
                     vprime = v[uprime]
                     lens.append(vprime)
                     if super_verbose:
-                        print ("  u, v", u,v )
-                        print ("    uprime, vprime:", uprime, vprime )
+                        print("  u, v", u,v )
+                        print("    uprime, vprime:", uprime, vprime )
             max_len = np.max(lens)
             if super_verbose:
-                print ("  Max length of path:", max_len)
+                print("  Max length of path:", max_len)
             if max_len < min_length:
                 bad_nodes.extend(G_sub.nodes())
                 if super_verbose:
-                    print (" appending to bad_nodes:", G_sub.nodes())
+                    print(" appending to bad_nodes:", G_sub.nodes())
 
     # remove bad_nodes
     G_.remove_nodes_from(bad_nodes)
     if verbose:
-        print (" num bad_nodes:", len(bad_nodes))
-        #print ("bad_nodes:", bad_nodes)
-        print (" len(G'.nodes()):", len(G_.nodes()))
-        print (" len(G'.edges()):", len(G_.edges()))
+        print(" num bad_nodes:", len(bad_nodes))
+        #print("bad_nodes:", bad_nodes)
+        print(" len(G'.nodes()):", len(G_.nodes()))
+        print(" len(G'.edges()):", len(G_.edges()))
     if super_verbose:
-        print ("  G_.nodes:", G_.nodes())
+        print("  G_.nodes:", G_.nodes())
         
     return G_
 
@@ -110,7 +123,7 @@ def clean_sub_graphs(G_, min_length=150, max_nodes_to_skip=100,
 def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
                          min_area=2000, contour_smoothing=0.001,
                          adapt_kernel=85, adapt_const=-3,
-                         outplot_file='', dpi=500, use_glob_thresh=False,
+                         use_glob_thresh=False,
                          kernel_open=19, verbose=False):
     '''Refine mask file and return both refined mask and skeleton'''
   
@@ -127,19 +140,50 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
     # global thresh
     glob_thresh_arr = cv2.threshold(blur, glob_thresh, 1, cv2.THRESH_BINARY)[1]
     glob_thresh_arr_smooth = cv2.medianBlur(glob_thresh_arr, kernel_blur)
+
+    ## skimage
+    #block_size = 81
+    #mask_thresh = threshold_adaptive(mask, block_size, offset=10)
+    #mask_thresh= mask_thresh.astype(int)
+    #plt.imshow(mask_thresh)
     
     t1 = time.time()
-    print ("Time to compute open(), close(), and get thresholds:", t1-t0, "seconds")
+    if verbose:
+        print("Time to compute open(), close(), and get thresholds:", t1-t0, "seconds")
     
     if use_glob_thresh:
         mask_thresh = glob_thresh_arr_smooth
     else:
+        # adaptive thresholding
+    #    Python: cv2.adaptiveThreshold(src, maxValue, adaptiveMethod, thresholdType, blockSize, C[, dst]) → dst
+    #    Parameters:
+    #    src – Source 8-bit single-channel image.
+    #    dst – Destination image of the same size and the same type as src .
+    #    maxValue – Non-zero value assigned to the pixels for which the condition is satisfied. See the details below.
+    #    adaptiveMethod – Adaptive thresholding algorithm to use, ADAPTIVE_THRESH_MEAN_C or ADAPTIVE_THRESH_GAUSSIAN_C . See the details below.
+    #    thresholdType – Thresholding type that must be either THRESH_BINARY or THRESH_BINARY_INV .
+    #    blockSize – Size of a pixel neighborhood that is used to calculate a threshold value for the pixel: 3, 5, 7, and so on.
+    #    C – Constant subtracted from the mean or weighted mean (see the details below). Normally, it is positive but may be zero or negative as well.
         adapt_thresh = cv2.adaptiveThreshold(mask,1,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
                     cv2.THRESH_BINARY,adapt_kernel, adapt_const)
+        #adapt_kernel = 501
+        #adapt_thresh = cv2.adaptiveThreshold(mask,150,cv2.ADAPTIVE_THRESH_MEAN_C,\
+        #            cv2.THRESH_BINARY,adapt_kernel,2)
         # resmooth
         adapt_thresh_smooth = cv2.medianBlur(adapt_thresh, kernel_blur)
 
         mask_thresh = adapt_thresh_smooth 
+
+    
+    ## background equalization
+    ## https://stackoverflow.com/questions/39231534/get-darker-lines-of-an-image-using-opencv
+    #max_value = np.max(mask)
+    #backgroundRemoved = mask.astype(float)
+    #bg_kern = 101
+    #blur_eq = cv2.GaussianBlur(backgroundRemoved, (bg_kern, bg_kern), 200)
+    #backgroundRemoved = backgroundRemoved/blur_eq
+    #backgroundRemoved = (backgroundRemoved*max_value/np.max(backgroundRemoved)).astype(np.uint8)
+    #closing_bg = cv2.morphologyEx(backgroundRemoved, cv2.MORPH_CLOSE, kernel_close)
     
     # opening and closing
     # http://docs.opencv.org/3.0-beta/doc/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
@@ -149,7 +193,8 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
     # try on bgRemoved?
     
     t2 = time.time()
-    print ("Time to compute adaptive_thresh, second open(), close():", t2-t1, "seconds")
+    if verbose:
+        print("Time to compute adaptive_thresh, second open(), close():", t2-t1, "seconds")
 
     # set output
     if contour_smoothing < 0:
@@ -161,6 +206,9 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
                                             min_thresh=glob_thresh, 
                                            min_area=min_area, 
                                            contour_smoothing=contour_smoothing)
+        #contours, cont_plot = get_contours(opening, min_thresh=glob_thresh, 
+        #                                   min_area=min_area, 
+        #                                   contour_smoothing=contour_smoothing)
     
         # for some reason contours don't extend to the edge, so clip the edge
         # and resize
@@ -168,27 +216,28 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
         shape_tmp = mask_filt_raw.shape
         mask_filt1 = 200 * cv2.resize(mask_filt_raw[2:-2, 2:-2], shape_tmp).astype(np.uint8)
         if verbose:
-            print ("mask:", mask)
-            print ("mask.dtype:", mask.dtype)
-            print ("mask_fi1t1.dtype:", mask_filt1.dtype)
-            print ("mask.shape == mask_filt1.shape:", mask.shape == mask_filt1.shape )
-            print ("mask_filt1.shape:", mask_filt1.shape)
-            print ("mask_filt1", mask_filt1)
+            print("mask:", mask)
+            print("mask.dtype:", mask.dtype)
+            print("mask_fi1t1.dtype:", mask_filt1.dtype)
+            print("mask.shape == mask_filt1.shape:", mask.shape == mask_filt1.shape )
+            print("mask_filt1.shape:", mask_filt1.shape)
+            print("mask_filt1", mask_filt1)
         # thresh and resmooth
         mask_filt = cv2.GaussianBlur(mask_filt1, (kernel_blur, kernel_blur), 0)
         #mask_filt = cv2.threshold(mask_filt2, glob_thresh, 1, cv2.THRESH_BINARY)
         final_mask = mask_filt    
 
     t3 = time.time()
-    print ("Time to smooth contours:", t3-t2, "seconds")
+    if verbose:
+        print("Time to smooth contours:", t3-t2, "seconds")
     
     # skeletonize
     #medial = medial_axis(final_mask)
     #medial_int = medial.astype(np.uint8)
     medial_int = medial_axis(final_mask).astype(np.uint8)
-    print ("Time to compute medial_axis:", time.time() - t3, "seconds")
-    
-    print ("Time to run dl_post_process_pred():", time.time() - t0, "seconds")
+    if verbose:
+        print("Time to compute medial_axis:", time.time() - t3, "seconds")
+        print("Time to run dl_post_process_pred():", time.time() - t0, "seconds")
     
     return final_mask, medial_int
 
@@ -284,7 +333,7 @@ def get_angle(p0, p1=np.array([0, 0]), p2=None):
 
 ###############################################################################
 def preprocess(img, thresh, img_mult=255, hole_size=300,
-               cv2_kernel_close=7, cv2_kernel_open=7, verbose=True):
+               cv2_kernel_close=7, cv2_kernel_open=7, verbose=False):
     '''
     http://scikit-image.org/docs/dev/api/skimage.morphology.html#skimage.morphology.remove_small_holes
     hole_size in remove_small_objects is the maximum area, in pixels of the
@@ -293,6 +342,7 @@ def preprocess(img, thresh, img_mult=255, hole_size=300,
 
     # sometimes get a memory error with this approach
     if img.size < 10000000000:
+    # if img.size < 0:
         if verbose:
             print("Run preprocess() with skimage")
         img = (img > (img_mult * thresh)).astype(np.bool)        
@@ -321,13 +371,12 @@ def preprocess(img, thresh, img_mult=255, hole_size=300,
         # opening and closing
         # http://docs.opencv.org/3.0-beta/doc/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
         #gradient = cv2.morphologyEx(mask_thresh, cv2.MORPH_GRADIENT, kernel)
-        closing = cv2.morphologyEx(mask_thresh, cv2.MORPH_CLOSE, kernel_close)
-        opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel_open)
-        img = opening.astype(np.bool)
+        closing_t = cv2.morphologyEx(mask_thresh, cv2.MORPH_CLOSE, kernel_close)
+        opening_t = cv2.morphologyEx(closing_t, cv2.MORPH_OPEN, kernel_open)
+        img = opening_t.astype(np.bool)
         #img = opening
 
     return img
-
 
 ###############################################################################
 def graph2lines(G):
@@ -382,9 +431,14 @@ def line_points_dist(line1, pts):
 
 
 ###############################################################################
-def remove_small_terminal(G):
+def remove_small_terminal(G, weight='weight', min_weight_val=30, 
+                          pix_extent=1300, edge_buffer=4, verbose=False):
+    '''Remove small terminals, if a node in the terminal is within edge_buffer
+    of the the graph edge, keep it'''
     deg = dict(G.degree())
     terminal_points = [i for i, d in deg.items() if d == 1]
+    if verbose:
+        print("remove_small_terminal() - N terminal_points:", len(terminal_points))
     edges = list(G.edges())
     for s, e in edges:
         if s == e:
@@ -395,20 +449,78 @@ def remove_small_terminal(G):
             if sum_len < 3:
                 G.remove_edge(s, e)
                 continue
+            
+        # check if at edge
+        sx, sy = G.nodes[s]['o']
+        ex, ey = G.nodes[e]['o']
+        edge_point = False
+        for ptmp in [sx, sy, ex, ey]:
+            if (ptmp < (0 + edge_buffer)) or (ptmp > (pix_extent - edge_buffer)):
+                if verbose:
+                    print("ptmp:", ptmp)
+                    print("(pix_extent - edge_buffer):", (pix_extent - edge_buffer))
+                    print("(ptmp > (pix_extent - edge_buffer):", (ptmp > (pix_extent - edge_buffer)))
+                    print("ptmp < (0 + edge_buffer):", (ptmp < (0 + edge_buffer)))
+                edge_point = True
+            else:
+                continue
+        # don't remove edges near the edge of the image
+        if edge_point:
+            if verbose:
+                print("(pix_extent - edge_buffer):", (pix_extent - edge_buffer))
+                print("edge_point:", sx, sy, ex, ey, "continue")
+            continue
+
         vals = flatten([[v] for v in G[s][e].values()])
         for ix, val in enumerate(vals):
-            if s in terminal_points and val.get('weight', 0) < 10:
+            if verbose:
+                print("val.get(weight, 0):", val.get(weight, 0) )
+            if s in terminal_points and val.get(weight, 0) < min_weight_val:
                 G.remove_node(s)
-            if e in terminal_points and val.get('weight', 0) < 10:
+            if e in terminal_points and val.get(weight, 0) < min_weight_val:
                 G.remove_node(e)
     return
 
 
 ###############################################################################
-def add_small_segments(G, terminal_points, terminal_lines, dist1=20, 
-                       dist2=100, angle1=20, angle2=160):
-    node = G.node
+def add_direction_change_nodes(pts, s, e, s_coord, e_coord):
+    if len(pts) > 3:
+        ps = pts.reshape(pts.shape[0], 1, 2).astype(np.int32)
+        approx = 2
+        ps = cv2.approxPolyDP(ps, approx, False)
+        ps = np.squeeze(ps, 1)
+        st_dist = np.linalg.norm(ps[0] - s_coord)
+        en_dist = np.linalg.norm(ps[-1] - s_coord)
+        if st_dist > en_dist:
+            s, e = e, s
+            s_coord, e_coord = e_coord, s_coord
+        ps[0] = s_coord
+        ps[-1] = e_coord
+    else:
+        ps = np.array([s_coord, e_coord], dtype=np.int32)
+    return ps
+
+
+###############################################################################
+def add_small_segments(G, terminal_points, terminal_lines, 
+                       dist1=24, dist2=80,
+                       angle1=30, angle2=150, 
+                       verbose=False):
+    '''Connect small, missing segments
+    terminal points are the end of edges.  This function tries to pair small
+    gaps in roads.  It will not try to connect a missed T-junction, as the 
+    crossroad will not have a terminal point'''
+    
+    print("Running add_small_segments()")
+    try:
+        node = G.node
+    except:
+        node = G.nodes
+    # if verbose:
+    #   print("node:", node)
+
     term = [node[t]['o'] for t in terminal_points]
+    # print("term:", term)
     dists = squareform(pdist(term))
     possible = np.argwhere((dists > 0) & (dists < dist1))
     good_pairs = []
@@ -438,62 +550,61 @@ def add_small_segments(G, terminal_points, terminal_lines, dist1=20,
         if (-1*angle1 < angle < angle1) or (angle < -1*angle2) or (angle > angle2):
             good_pairs.append((s, e))
 
+    if verbose:
+        print("  good_pairs:", good_pairs)
+        
     dists = {}
     for s, e in good_pairs:
-        s_d, e_d = [G.node[s]['o'], G.node[e]['o']]
+        s_d, e_d = [G.nodes[s]['o'], G.nodes[e]['o']]
+        # print("s_d", s_d)
+        # print("type s_d", type(s_d))
+        # print("s_d - e_d", s_d - e_d)
+        # return
         dists[(s, e)] = np.linalg.norm(s_d - e_d)
 
     dists = OrderedDict(sorted(dists.items(), key=lambda x: x[1]))
 
     wkt = []
     added = set()
+    good_coords = []
     for s, e in dists.keys():
         if s not in added and e not in added:
             added.add(s)
             added.add(e)
-            s_d, e_d = G.node[s]['o'], G.node[e]['o']
+            s_d, e_d = G.nodes[s]['o'].astype(np.int32), G.nodes[e]['o'].astype(np.int32)
             line_strings = ["{1:.1f} {0:.1f}".format(*c.tolist()) for c in [s_d, e_d]]
             line = '(' + ", ".join(line_strings) + ')'
             wkt.append(linestring.format(line))
-    return wkt
-
-
-###############################################################################
-def add_direction_change_nodes(pts, s, e, s_coord, e_coord):
-    if len(pts) > 3:
-        ps = pts.reshape(pts.shape[0], 1, 2).astype(np.int32)
-        approx = 2
-        ps = cv2.approxPolyDP(ps, approx, False)
-        ps = np.squeeze(ps, 1)
-        st_dist = np.linalg.norm(ps[0] - s_coord)
-        en_dist = np.linalg.norm(ps[-1] - s_coord)
-        if st_dist > en_dist:
-            s, e = e, s
-            s_coord, e_coord = e_coord, s_coord
-        ps[0] = s_coord
-        ps[-1] = e_coord
-    else:
-        ps = np.array([s_coord, e_coord], dtype=np.int32)
-    return ps
+            good_coords.append( (tuple(s_d), tuple(e_d)) )
+    return wkt, good_pairs, good_coords
 
 
 ###############################################################################
 def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
-                  clip=2, img_shape=(1300,1300), img_mult=255, hole_size=300,
+                  clip=2, img_shape=(1300, 1300), img_mult=255, hole_size=300,
                   cv2_kernel_close=7, cv2_kernel_open=7,
-                  use_medial_axis=False, max_out_size=(200000, 200000),
-                  num_classes=1, skeleton_band='all'):
+                  use_medial_axis=False,
+                  max_out_size=(200000, 200000),
+                  num_classes=1,
+                  skeleton_band='all',
+                  kernel_blur=27,
+                  min_background_frac=0.2,
+                  verbose=False
+                  ):
     '''
     Extract a skeleton from a mask.
     skeleton_band is the index of the band of the mask to use for 
-        skeleton extractionk, set to string 'all' to use all bands
+        skeleton extraction, set to string 'all' to use all bands
     '''
     
-    print ("Executing make_skeleton...")
+    if verbose:
+        print("Executing make_skeleton...")
     t0 = time.time()
     #replicate = 5
     #clip = 2
     rec = replicate + clip
+    weight_arr = None
+
 
     # read in data
     if num_classes == 1:
@@ -517,25 +628,28 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
             img = np.sum(img_full, axis=0).astype(np.int8)
         else:
             img = img_full[skeleton_band, :, :]
-            
-    print ("make_skeleton(), input img_shape:", img_shape)
-    print ("make_skeleton(), img.shape:", img.shape)
-    print ("make_skeleton(), img.size:", img.size)
-    print ("make_skeleton(), img dtype:", img.dtype)
-    #print ("make_skeleton(), img unique:", np.unique(img))
+    if verbose:
+        print("make_skeleton(), input img_shape:", img_shape)
+        print("make_skeleton(), img.shape:", img.shape)
+        print("make_skeleton(), img.size:", img.size)
+        print("make_skeleton(), img dtype:", img.dtype)
+        #print("make_skeleton(), img unique:", np.unique(img))
 
     ##########
     # potentially keep only subset of data 
     shape0 = img.shape
     img = img[:max_out_size[0], :max_out_size[1]]
     if img.shape != shape0:
-        print ("Using only subset of data!!!!!!!!")
-        print ("make_skeletion() new img.shape:", img.shape)
+        print("Using only subset of data!!!!!!!!")
+        print("make_skeletion() new img.shape:", img.shape)
     ##########
+
+    #if len(img_shape) > 0:
+    #    assert img.shape == img_shape #(1300, 1300)
     
     if fix_borders:
         img = cv2.copyMakeBorder(img, replicate, replicate, replicate, 
-                                 replicate, cv2.BORDER_REPLICATE)
+                                 replicate, cv2.BORDER_REPLICATE)        
     img_copy = None
     if debug:
         if fix_borders:
@@ -543,131 +657,235 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
         else:
             img_copy = np.copy(img)
         
-    print ("run preprocess()...")
+    if verbose:
+        print("Run preprocess()...")
     t1 = time.time()
     img = preprocess(img, thresh, img_mult=img_mult, hole_size=hole_size,
                      cv2_kernel_close=cv2_kernel_close, 
                      cv2_kernel_open=cv2_kernel_open)
+    
+    # img, _ = dl_post_process_pred(img)
+    
     t2 = time.time()
-    print ("Time to run preprocess():", t2-t1, "seconds")
+    if verbose:
+        print("Time to run preprocess():", t2-t1, "seconds")
     if not np.any(img):
         return None, None
     
     if not use_medial_axis:
-        print ("skeletonize...")
+        if verbose:
+            print("skeletonize...")
         ske = skeletonize(img).astype(np.uint16)
         t3 = time.time()
-        print ("Time to run skimage.skeletonize():", t3-t2, "seconds")
+        if verbose:
+            print("Time to run skimage.skeletonize():", t3-t2, "seconds")
 
     else:
-        print ("running skimaage.medial_axis...")
-        ske = skimage.morphology.medial_axis(img).astype(np.uint16)
+        if verbose:
+            print("running updated skimage.medial_axis...")
+        ske = medial_axis_weight.medial_axis_weight(
+                img, weight_arr=weight_arr,
+                return_distance=False).astype(np.uint16)
+        # ske = skimage.morphology.medial_axis(img).astype(np.uint16)
         t3 = time.time()
-        print ("Time to run skimage.medial_axis():", t3-t2, "seconds")
-
+        if verbose:
+            print("Time to run medial_axis_weight():", t3-t2, "seconds")
+        # print("Time to run skimage.medial_axis():", t3-t2, "seconds")
 
     if fix_borders:
-        print ("fix_borders...")
+        if verbose:
+            print("fix_borders...")
         ske = ske[rec:-rec, rec:-rec]
         ske = cv2.copyMakeBorder(ske, clip, clip, clip, clip, cv2.BORDER_CONSTANT, value=0)
+        # ske = ske[replicate:-replicate,replicate:-replicate]  
+        img = img[replicate:-replicate,replicate:-replicate]
         t4 = time.time()
-        print ("Time fix borders:", t4-t3, "seconds")
-
+        if verbose:
+            print("Time fix borders:", t4-t3, "seconds")
+    
     t1 = time.time()
-    print ("ske.shape:", ske.shape)
-    print ("Time to run make_skeleton:", t1-t0, "seconds")
+    if verbose:
+        print("ske.shape:", ske.shape)
+        print("Time to run make_skeleton:", t1-t0, "seconds")
+    
+    #print("make_skeletion(), ske.shape:", ske.shape)
+    #print("make_skeletion(), ske.size:", ske.size)
+    #print("make_skeletion(), ske dtype:", ske.dtype)
+    #print("make_skeletion(), ske unique:", np.unique(ske))
+    #return
 
     return img, ske
 
+
 ###############################################################################
-def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3, 
-                    #threshes={'2': .3, '3': .3, '4': .3, '5': .2}, 
-                debug=False, add_small=True, fix_borders=True,
-                img_shape=(1300, 1300),
-                skel_replicate=5, skel_clip=2, min_subgraph_length_pix=150,
-                img_mult=255, hole_size=300, cv2_kernel_close=7, cv2_kernel_open=7,
-                max_out_size=(100000, 100000),
-                num_classes=1,
-                skeleton_band='all',
-                verbose=False):
+def img_to_ske_G(params):
+
+    img_loc, out_ske_file, out_gpickle, thresh, \
+                debug, fix_borders, \
+                img_shape,\
+                skel_replicate, skel_clip, \
+                img_mult, hole_size, \
+                cv2_kernel_close, cv2_kernel_open,\
+                min_subgraph_length_pix,\
+                min_spur_length_pix,\
+                max_out_size,\
+                use_medial_axis,\
+                num_classes,\
+                skeleton_band, \
+                kernel_blur,\
+                min_background_frac,\
+                verbose\
+        = params
 
     # create skeleton
-    img_copy, ske = make_skeleton(img_loc, thresh, debug, fix_borders, 
+    img_refine, ske = make_skeleton(img_loc, thresh, debug, fix_borders, 
                       replicate=skel_replicate, clip=skel_clip, 
                       img_shape=img_shape, 
                       img_mult=img_mult, hole_size=hole_size,
-                      cv2_kernel_close=cv2_kernel_close, cv2_kernel_open=cv2_kernel_open,
+                      cv2_kernel_close=cv2_kernel_close,
+                      cv2_kernel_open=cv2_kernel_open,
                       max_out_size=max_out_size,
                       skeleton_band=skeleton_band,
-                      num_classes=num_classes)
+                      num_classes=num_classes,
+                      use_medial_axis=use_medial_axis,
+                      kernel_blur=kernel_blur,
+                      min_background_frac=min_background_frac,
+                      verbose=verbose)
+
+    # print("img_loc:", img_loc)
+
     #img_copy, ske = make_skeleton(root, fn, debug, threshes, fix_borders)
     if ske is None:
-        return [linestring.format("EMPTY")]
+        return [linestring.format("EMPTY"), [], []]
     # save to file
     if out_ske_file:
         cv2.imwrite(out_ske_file, ske.astype(np.uint8)*255)
+        ## write portion to file?
+        #out_ske_part = out_ske_file.split('.tif')[0] + '_part.tif'
+        #print('out_ske_part_path', out_ske_part)
+        #cv2.imwrite(out_ske_part, ske[0:2000, 0:2000].astype(np.uint8)*220)
     
     # create graph
-    print ("Execute sknw...")
-    # if the file is too large, use sknw_int64 to accomodate high numbers 
+    if verbose:
+        print("Execute sknw...")
+    # if the file is too large, use sknw_int64 to accomodate high numbers
     #   for coordinates
     if np.max(ske.shape) > 32767:
         G = sknw_int64.build_sknw(ske, multi=True)
     else:
         G = sknw.build_sknw(ske, multi=True)
-    remove_small_terminal(G)
-    print ("len G.nodes():", len(G.nodes()))
-    print ("len G.edges():", len(G.edges()))
-    if len(G.edges()) == 0:
-        return [linestring.format("EMPTY")]
-        
-    # print a random node and edge
+
+   # print a random node and edge
     if verbose:
-        node_tmp= list(G.nodes())[-1]
-        print (node_tmp, "random node props:", G.nodes[node_tmp])
+        node_tmp = list(G.nodes())[-1]
+        print(node_tmp, "random node props:", G.nodes[node_tmp])
         # print an edge
         edge_tmp = list(G.edges())[-1]
-        print ("random edge props for edge:", edge_tmp, " = ", 
-               G.edges[edge_tmp[0], edge_tmp[1], 0]) #G.edge[edge_tmp[0]][edge_tmp[1]])    
-    
-    print ("Clean out short subgraphs")
+        #print("random edge props for edge:", edge_tmp, " = ",
+        #      G.edges[edge_tmp[0], edge_tmp[1], 0]) #G.edge[edge_tmp[0]][edge_tmp[1]])
+
+    # iteratively clean out small terminals
+    for itmp in range(8):
+        ntmp0 = len(G.nodes())
+        if verbose:
+            print("Clean out small terminals - round", itmp)
+            print("Clean out small terminals - round", itmp, "num nodes:", ntmp0)
+        # sknw attaches a 'weight' property that is the length in pixels
+        pix_extent = np.max(ske.shape)
+        remove_small_terminal(G, weight='weight',
+                              min_weight_val=min_spur_length_pix,
+                              pix_extent=pix_extent)
+        # kill the loop if we stopped removing nodes
+        ntmp1 = len(G.nodes())
+        if ntmp0 == ntmp1:
+            break
+        else:
+            continue
+
     if verbose:
-        sub_graphs = list(nx.connected_component_subgraphs(G))
-        print ("sub_graphs:", sub_graphs)
-    # sknw attaches a 'weight' property that is the length in pixels
-    t01 = time.time()
-    G = clean_sub_graphs(G, min_length=min_subgraph_length_pix, 
-                     max_nodes_to_skip=100,
-                     weight='weight', verbose=verbose,
-                     super_verbose=False)
-    t02 = time.time()
-    print ("Time to run clean_sub_graphs():", t02-t01, "seconds")
-    print ("len G_sub.nodes():", len(G.nodes()))
-    print ("len G_sub.edges():", len(G.edges()))
+        print("len G.nodes():", len(G.nodes()))
+        print("len G.edges():", len(G.edges()))
+    if len(G.edges()) == 0:
+        return [linestring.format("EMPTY"), [], []]
+
+    # print a random node and edge
+    if verbose:
+        node_tmp = list(G.nodes())[-1]
+        print(node_tmp, "random node props:", G.nodes[node_tmp])
+        # print an edge
+        edge_tmp = list(G.edges())[-1]
+        print("random edge props for edge:", edge_tmp, " = ",
+              G.edges[edge_tmp[0], edge_tmp[1], 0]) #G.edge[edge_tmp[0]][edge_tmp[1]])
+        # node_tmp = list(G.nodes())[np.random.randint(len(G.nodes()))]
+        # print(node_tmp, "G.node props:", G.nodes[node_tmp])
+        # edge_tmp = list(G.edges())[np.random.randint(len(G.edges()))]
+        # print(edge_tmp, "G.edge props:", G.edges(edge_tmp))
+        # print(edge_tmp, "G.edge props:", G.edges[edge_tmp[0]][edge_tmp[1]])
+
+    # # let's not clean out subgraphs yet, since we still need to run
+    # # add_small_segments() and terminal_points_to_crossroads()
+    # if verbose:
+    #     print("Clean out short subgraphs")
+    #     try:
+    #         sub_graphs = list(nx.connected_component_subgraphs(G))
+    #     except:
+    #         sub_graphs = list(nx.conncted_components(G))
+    #     # print("sub_graphs:", sub_graphs)
+    # # sknw attaches a 'weight' property that is the length in pixels
+    # t01 = time.time()
+    # G = clean_sub_graphs(G, min_length=min_subgraph_length_pix,
+    #                  max_nodes_to_skip=100,
+    #                  weight='weight', verbose=verbose,
+    #                  super_verbose=False)
+    # t02 = time.time()
+    # if verbose:
+    #     print("Time to run clean_sub_graphs():", t02-t01, "seconds")
+    #     print("len G_sub.nodes():", len(G.nodes()))
+    #     print("len G_sub.edges():", len(G.edges()))
+
+    # remove self loops
+    ebunch = nx.selfloop_edges(G)
+    G.remove_edges_from(list(ebunch))
 
     # save G
     if len(out_gpickle) > 0:
         nx.write_gpickle(G, out_gpickle)
-    
+
+    return G, ske, img_refine
+
+
+###############################################################################
+def G_to_wkt(G, add_small=True, connect_crossroads=True,
+             img_copy=None, debug=False, verbose=False, super_verbose=False):
+    """Transform G to wkt"""
+
+    # print("G:", G)
+    if G == [linestring.format("EMPTY")] or type(G) == str:
+        return [linestring.format("EMPTY")]
+
     node_lines = graph2lines(G)
-    if verbose:
-        print ("node_lines:", node_lines)
-     
+    # if verbose:
+    #    print("node_lines:", node_lines)
+
     if not node_lines:
         return [linestring.format("EMPTY")]
-    node = G.node
-    #print ("node:", node)
+    try:
+        node = G.node
+    except:
+        node = G.nodes
+    # print("node:", node)
     deg = dict(G.degree())
     wkt = []
     terminal_points = [i for i, d in deg.items() if d == 1]
 
     # refine wkt
-    print ("Refine wkt...")
+    if verbose:
+        print("Refine wkt...")
     terminal_lines = {}
     vertices = []
-    for i,w in enumerate(node_lines):
-        if ((i % 10000) == 0) and (i > 0):
-            print ("  ", i, "/", len(node_lines))
+    for i, w in enumerate(node_lines):
+        if ((i % 10000) == 0) and (i > 0) and verbose:
+            print("  ", i, "/", len(node_lines))
         coord_list = []
         additional_paths = []
         for s, e in pairwise(w):
@@ -675,8 +893,7 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
             for ix, val in enumerate(vals):
 
                 s_coord, e_coord = node[s]['o'], node[e]['o']
-                #print ("s_coord:", s_coord, "e_coord:", e_coord)
-                
+                # print("s_coord:", s_coord, "e_coord:", e_coord)
                 pts = val.get('pts', [])
                 if s in terminal_points:
                     terminal_lines[s] = (s_coord, e_coord)
@@ -702,6 +919,9 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
         if not len(coord_list):
             continue
         segments = remove_duplicate_segments(coord_list)
+        # print("segments:", segments)
+        # return
+    
         for coord_list in segments:
             if len(coord_list) > 1:
                 line = '(' + ", ".join(coord_list) + ')'
@@ -716,7 +936,10 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
                 wkt.append(linestring.format('(' + line + ')'))
 
     if add_small and len(terminal_points) > 1:
-        wkt.extend(add_small_segments(G, terminal_points, terminal_lines))
+        small_segs, good_pairs, good_coords = add_small_segments(
+            G, terminal_points, terminal_lines, verbose=verbose)
+        print("small_segs", small_segs)
+        wkt.extend(small_segs)
 
     if debug:
         vertices = flatten(vertices)
@@ -724,36 +947,51 @@ def build_graph_wkt(img_loc, out_ske_file, out_gpickle='', thresh=0.3,
 
     if not wkt:
         return [linestring.format("EMPTY")]
-    
+
+    #return cross_segs
     return wkt
 
 
+
 ###############################################################################
-def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3, #threshes={'2': .3, '3': .3, '4': .3, '5': .2}, 
-                im_prefix='',
-                debug=False, add_small=True, fix_borders=True,
-                img_shape=(1300, 1300),
-                skel_replicate=5, skel_clip=2,
-                img_mult=255, 
-                hole_size=300, cv2_kernel_close=7, cv2_kernel_open=7,
-                min_subgraph_length_pix=50,
-                spacenet_naming_convention=False,
-                num_classes=1,
-                max_out_size=(100000, 100000),
-                skeleton_band='all'):
+def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3,
+                  # threshes={'2': .3, '3': .3, '4': .3, '5': .2},
+                  im_prefix='',
+                  debug=False, 
+                  add_small=True, 
+                  fix_borders=True,
+                  img_shape=(1300, 1300),
+                  skel_replicate=5, skel_clip=2,
+                  img_mult=255,
+                  hole_size=300, cv2_kernel_close=7, cv2_kernel_open=7,
+                  min_subgraph_length_pix=50,
+                  min_spur_length_pix=16,
+                  spacenet_naming_convention=False,
+                  num_classes=1,
+                  max_out_size=(100000, 100000),
+                  use_medial_axis=True,
+                  skeleton_band='all',
+                  kernel_blur=27,
+                  min_background_frac=0.2,
+                  n_threads=12,
+                  verbose=False,
+                  super_verbose=False):
     '''Execute built_graph_wkt for an entire folder
     Split image name on AOI, keep only name after AOI.  This is necessary for 
     scoring'''
-    
-    all_data = []
+
     im_files = np.sort([z for z in os.listdir(indir) if z.endswith('.tif')])
     nfiles = len(im_files)
-    for i,imfile in enumerate(im_files):
+    n_threads = min(n_threads, nfiles)
+    params = []
+    for i, imfile in enumerate(im_files):
+                
         t1 = time.time()
-        print ("\n\n", i+1, "/", nfiles, ":", imfile)
+        if verbose:
+            print("\n", i+1, "/", nfiles, ":", imfile)
         logger1.info("{x} / {y} : {z}".format(x=i+1, y=nfiles, z=imfile))
         img_loc = os.path.join(indir, imfile)
-        
+
         if spacenet_naming_convention:
             im_root = 'AOI' + imfile.split('AOI')[-1].split('.')[0]
         else:
@@ -761,37 +999,69 @@ def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3, #threshe
         if len(im_prefix) > 0:
             im_root = im_root.split(im_prefix)[-1]
 
-        print ("  img_loc:", img_loc)
-        print ("  im_root:", im_root)
+        if verbose:
+            print("  img_loc:", img_loc)
+            print("  im_root:", im_root)
         if out_ske_dir:
             out_ske_file = os.path.join(out_ske_dir, imfile)
         else:
             out_ske_file = ''
-        print ("  out_ske_file:", out_ske_file)
+        if verbose:
+            print("  out_ske_file:", out_ske_file)
         if len(out_gdir) > 0:
-            out_gpickle = os.path.join(out_gdir, imfile.split('.')[0] + '.gpickle')
+            out_gpickle = os.path.join(out_gdir,
+                                       imfile.split('.')[0] + '.gpickle')
         else:
             out_gpickle = ''
-        
-        # create wkt list
-        wkt_list = build_graph_wkt(img_loc, out_ske_file, 
-                out_gpickle=out_gpickle, thresh=thresh, #threshes={'2': .3, '3': .3, '4': .3, '5': .2}, 
-                debug=debug, add_small=add_small, fix_borders=fix_borders,
-                img_shape=img_shape,
-                skel_replicate=skel_replicate, skel_clip=skel_clip,
-                img_mult=img_mult, hole_size=hole_size,
-                cv2_kernel_close=cv2_kernel_close, cv2_kernel_open=cv2_kernel_open,
-                min_subgraph_length_pix=min_subgraph_length_pix,
-                max_out_size=max_out_size,
-                num_classes=num_classes,
-                skeleton_band=skeleton_band)
+
+        param_row = (img_loc, out_ske_file, out_gpickle, thresh, \
+                debug, fix_borders, \
+                img_shape,\
+                skel_replicate, skel_clip, \
+                img_mult, hole_size, \
+                cv2_kernel_close, cv2_kernel_open,\
+                min_subgraph_length_pix,\
+                min_spur_length_pix,\
+                max_out_size,\
+                use_medial_axis,\
+                num_classes,\
+                skeleton_band, \
+                kernel_blur,\
+                min_background_frac,\
+                verbose)
+        params.append(param_row)
+
+    # execute
+    if n_threads > 1:
+        pool = Pool(n_threads)
+        pool.map(img_to_ske_G, params)
+    else:
+        img_to_ske_G(params[0])
+
+    # now build wkt_list (single-threaded)
+    all_data = []
+    for gpickle in os.listdir(out_gdir):
+        t1 = time.time()
+        gpath = os.path.join(out_gdir, gpickle)
+        imfile = gpickle.split('.')[0] + '.tif'
+        if spacenet_naming_convention:
+            im_root = 'AOI' + imfile.split('AOI')[-1].split('.')[0]
+        else:
+            im_root = imfile.split('.')[0]
+        if len(im_prefix) > 0:
+            im_root = im_root.split(im_prefix)[-1]
+
+        G = nx.read_gpickle(gpath)
+        wkt_list = G_to_wkt(G, add_small=add_small, 
+                            verbose=verbose, super_verbose=super_verbose)
+
         # add to all_data
         for v in wkt_list:
             all_data.append((im_root, v))
-            #all_data.append((imfile, v))
+            # all_data.append((imfile, v))
         t2 = time.time()
         logger1.info("Time to build graph: {} seconds".format(t2-t1))
-    
+
     # save to csv
     df = pd.DataFrame(all_data, columns=['ImageId', 'WKT_Pix'])
     df.to_csv(outfile, index=False)
@@ -803,17 +1073,38 @@ def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3, #threshe
 def main():
 
     global logger1
-    spacenet_naming_convention = False # True
+    add_small=True
+    verbose = True
+    super_verbose = False
+    spacenet_naming_convention = False  # True
+    debug=False
+    fix_borders=True
+    img_shape=() # (1300, 1300)
+    skel_replicate=5
+    skel_clip=2
+    img_mult=255
+    hole_size=300
+    cv2_kernel_close=7
+    cv2_kernel_open=7
+    kernel_blur=-1  # 25
+    min_background_frac=-1  # 0.2
+    max_out_size=(2000000, 2000000)
+    n_threads = 12
+    im_prefix = ''
     
     parser = argparse.ArgumentParser()
     parser.add_argument('config_path')
     args = parser.parse_args()
-
     with open(args.config_path, 'r') as f:
         cfg = json.load(f)
         config = Config(**cfg)
 
-    im_prefix = ''
+    min_spur_length_pix = int(np.rint(config.min_spur_length_m / config.GSD))
+    print("min_spur_length_pix:", min_spur_length_pix)
+    use_medial_axis = bool(config.use_medial_axis)
+    print("Use_medial_axis?", use_medial_axis)
+    pix_extent = config.eval_rows - (2 * config.padding)
+
     # check if we are stitching together large images or not
     out_dir_mask_norm = os.path.join(config.path_results_root, 
                                      config.test_results_dir, 
@@ -849,51 +1140,53 @@ def main():
     else:
         out_gdir = ''
          
-    print ("im_dir:", im_dir)
-    print ("out_ske_dir:", out_ske_dir)
-    print ("out_gdir:", out_gdir)
+    print("im_dir:", im_dir)
+    print("out_ske_dir:", out_ske_dir)
+    print("out_gdir:", out_gdir)
         
     thresh = config.skeleton_thresh
+#    # thresholds for each aoi
+#    threshes={'2': .3, '3': .3, '4': .3, '5': .2}  
+#    thresh = threshes[config.aoi]
     min_subgraph_length_pix = config.min_subgraph_length_pix
-    
-    debug=False
-    add_small=True
-    fix_borders=True
-    img_shape=() #(1300, 1300)
-    skel_replicate=5
-    skel_clip=2
-    img_mult=255
-    hole_size=300
-    cv2_kernel_close=7
-    cv2_kernel_open=7
-    #max_out_size=(16000, 8000)  # works fine
-    #max_out_size=(8003, 16009)   # works fine
-    max_out_size=(2000000, 2000000)
- 
+    #min_subgraph_length_pix=200
+
     log_file = os.path.join(res_root_dir, 'skeleton.log')
-    console, logger1 = make_logger.make_logger(log_file, logger_name='log')
-   
+    console, logger1 = make_logger.make_logger(log_file, logger_name='log',
+                                               write_to_console=bool(config.log_to_console))   
     
-    print ("Building wkts...")
+    # print("Building wkts...")
     t0 = time.time()
-    df = build_wkt_dir(im_dir, outfile_csv, out_ske_dir, out_gdir, thresh, #threshes={'2': .3, '3': .3, '4': .3, '5': .2}, 
-                debug=debug, add_small=add_small, fix_borders=fix_borders,
+    df = build_wkt_dir(im_dir, outfile_csv, out_ske_dir, out_gdir, thresh, 
+                debug=debug, 
+                add_small=add_small, 
+                fix_borders=fix_borders,
                 img_shape=img_shape,
                 skel_replicate=skel_replicate, skel_clip=skel_clip,
                 img_mult=img_mult, hole_size=hole_size,
                 min_subgraph_length_pix=min_subgraph_length_pix,
+                min_spur_length_pix=min_spur_length_pix,
                 cv2_kernel_close=cv2_kernel_close, cv2_kernel_open=cv2_kernel_open,
                 max_out_size=max_out_size,
                 skeleton_band=config.skeleton_band,
                 num_classes=config.num_classes,
                 im_prefix=im_prefix,
-                spacenet_naming_convention=spacenet_naming_convention)        
+                spacenet_naming_convention=spacenet_naming_convention,
+                use_medial_axis=use_medial_axis,
+                kernel_blur=kernel_blur,
+                min_background_frac=min_background_frac,
+                n_threads=n_threads,
+                verbose=verbose,
+                super_verbose=super_verbose
+                )        
 
-    print ("len df:", len(df))
-    print ("outfile:", outfile_csv)
+    print("len df:", len(df))
+    print("outfile:", outfile_csv)
     t1 = time.time()
     logger1.info("Total time to run build_wkt_dir: {} seconds".format(t1-t0))
-    # print ("Total time to run build_wkt_dir:", t1-t0, "seconds")
+    print("Total time to run build_wkt_dir:", t1-t0, "seconds")
 
+
+##############################################################################
 if __name__ == "__main__":
     main()

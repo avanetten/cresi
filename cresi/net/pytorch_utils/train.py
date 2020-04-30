@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import numpy as np
 from collections import defaultdict
 
 import torch
@@ -33,8 +34,16 @@ torch.backends.cudnn.benchmark = True
 
 models = {
     'resnet34': unet.Resnet34_upsample,
+    'resnet50': unet.Resnet50_upsample,
+    'resnet101': unet.Resnet101_upsample,
     #'resnet34_3channel': unet.Resnet34_upsample,
     #'resnet34_8channel': unet.Resnet34_upsample,
+    'seresnet50': unet.SeResnet50_upsample,
+    'seresnet101': unet.SeResnet101_upsample,
+    'seresnet152': unet.SeResnet152_upsample,
+    'seresnext50': unet.SeResnext50_32x4d_upsample,
+    'seresnext101': unet.SeResnext101_32x4d_upsample,
+
 }
 
 optimizers = {
@@ -270,11 +279,12 @@ class PytorchTrain:
 
         return meter, ypreds
 
-    def fit(self, train_loader, val_loader, nb_epoch):
+    def fit(self, train_loader, val_loader, nb_epoch, logger=None):
         self.callbacks.on_train_begin()
 
         t0 = time.time()
         for epoch in range(self.estimator.start_epoch, nb_epoch):
+            t1 = time.time()
             self.callbacks.on_epoch_begin(epoch)
 
             if self.estimator.lr_scheduler is not None:
@@ -287,12 +297,21 @@ class PytorchTrain:
             # print("pytorch_utils.train.py.fit() checkpoint1")
             self.metrics_collection.val_metrics = self._run_one_epoch(epoch, val_loader, training=False)
             # print("pytorch_utils.train.py.fit() checkpoint2")
-            t1 = time.time()
-            print("Total time elapsed:", (t1 - t0)/60., "minutes")
-
+            t2 = time.time()
+            #logger.info("folds_file_loc: {}".format(folds_file_loc))
+            dt = np.round( (t2 - t1)/60.0, 1)
+            dt_tot = np.round( (t2 - t0)/60.0, 1)
+            if logger:
+                logger.info("train epoch {}, time elapsed (minutes): {}".format(epoch, dt))
+                logger.info("  train epoch {}, train loss: {} ".format(epoch, self.metrics_collection.train_metrics))
+                logger.info("  train epoch {}, val loss: {} ".format(epoch, self.metrics_collection.val_metrics))
+                logger.info("  train epoch {}, total time elapsed (minutes): {}".format(epoch, dt_tot))
+            print("epoch", epoch, "dt:", dt, "minutes")
+            print("Total time elapsed:", dt_tot, "minutes")
             self.callbacks.on_epoch_end(epoch)
-
             if self.metrics_collection.stop_training:
+                logger.info("  callback stop training issued...")
+                logger.info("  callbacks.on_epoch_end(epoch) ".format(self.callbacks.on_epoch_end(epoch)))
                 break
 
         self.callbacks.on_train_end()
@@ -305,6 +324,7 @@ def train(ds, fold, train_idx, val_idx, config, save_path, log_path,
     #os.makedirs(os.path.join(config.results_dir, 'logs'), exist_ok=True)
     #save_path = os.path.join(config.results_dir, 'weights', config.folder)
     model = models[config.network](num_classes=config.num_classes, num_channels=config.num_channels)
+    print("model:", model)
     if logger:
         logger.info("pytorch_utils train.py config.num_channels: {}".format(config.num_channels))
         logger.info("pytorch_utils train.py function train(),  model: {}".format(model))
@@ -354,4 +374,4 @@ def train(ds, fold, train_idx, val_idx, config, save_path, log_path,
                                    pin_memory=True)
     print("pytorch_utils.train.py len val_loader:", len(val_loader))
     print("Run trainer.fit in pytorch_utils.train.py...")
-    trainer.fit(train_loader, val_loader, config.nb_epoch)
+    trainer.fit(train_loader, val_loader, config.nb_epoch, logger=logger)

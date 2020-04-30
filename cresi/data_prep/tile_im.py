@@ -9,6 +9,7 @@ Created on Tue May 15 16:16:58 2018
 from __future__ import print_function
 
 import os
+import sys
 import time
 import argparse
 import numpy as np
@@ -17,10 +18,10 @@ import cv2
 # cv2 can't load large files, so need to import skimage too
 import skimage.io 
 
-#import sys
-#path_basiss = os.path.dirname(os.path.realpath(__file__))
-#sys.path.append(path_basiss)
-#import basiss
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'configs'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from configs.config import Config
+
 
 ###############################################################################
 def slice_ims(im_dir, out_dir, slice_x, slice_y, 
@@ -34,7 +35,7 @@ def slice_ims(im_dir, out_dir, slice_x, slice_y,
     Adapted from basiss.py'''
     
     if verbose:
-        print ("Slicing images in:", im_dir)
+        print("Slicing images in:", im_dir)
         
     t0 = time.time()    
     count = 0
@@ -47,7 +48,7 @@ def slice_ims(im_dir, out_dir, slice_x, slice_y,
 
         im_path =  os.path.join(im_dir, im_root)
         if verbose:
-            print ("im_path:", im_path)
+            print("im_path:", im_path)
         name = im_root.split('.')[0]
         
         # load with skimage, and reverse order of bands
@@ -56,14 +57,14 @@ def slice_ims(im_dir, out_dir, slice_x, slice_y,
         #im = cv2.imread(im_path)
         h, w, nbands = im.shape
         n_pix = h * w
-        print ("im.shape:", im.shape)
-        print ("n pixels:", n_pix)
+        print("im.shape:", im.shape)
+        print("n pixels:", n_pix)
         tot_pixels += n_pix 
         
         seen_coords = set()
         
         #if verbose and (i % 10) == 0:
-        #    print (i, "im_root:", im_root)
+        #    print(i, "im_root:", im_root)
                 
         # dice it up
         # after resize, iterate through image 
@@ -83,7 +84,7 @@ def slice_ims(im_dir, out_dir, slice_x, slice_y,
                 
                 # check if we screwed up binning
                 if (xmin + slice_x > w) or (ymin + slice_y > h):
-                    print ("Improperly binned image,")
+                    print("Improperly binned image,")
                     return
 
                 # get satellite image cutout
@@ -98,7 +99,7 @@ def slice_ims(im_dir, out_dir, slice_x, slice_y,
                     count += 1
                 
                 if verbose and (count % 50) == 0:
-                    print ("count:", count, "x:", x, "y:", y) 
+                    print("count:", count, "x:", x, "y:", y) 
                 ###############
                                 
 
@@ -127,43 +128,39 @@ def slice_ims(im_dir, out_dir, slice_x, slice_y,
     df_pos.index = np.arange(len(df_pos))
     
     if verbose:
-        print ("  len df;", len(df_pos))
-        print ("  Time to slice arrays:", time.time() - t0, "seconds")
-        print ("  Total pixels in test image(s):", tot_pixels)
+        print("  len df;", len(df_pos))
+        print("  Time to slice arrays:", time.time() - t0, "seconds")
+        print("  Total pixels in test image(s):", tot_pixels)
         
     return df_pos
 
 
-###############################################################################
-if __name__ == '__main__':
-
+##############################################################################
+def main():
     
-#    # construct the argument parse and parse the arguments
-#    parser = argparse.ArgumentParser()
-#    parser.add_argument('--im_dir', type=str, default='/raid/data/ave/spacenet/data/spacenetv2/AOI_2_Vegas_Test/yuge/for_basiss_8bit_albu',
-#                        help="images location")
-#    parser.add_argument('--out_dir', type=str, default='/raid/data/ave/spacenet/data/spacenetv2/AOI_2_Vegas_Test/yuge/for_basiss_8bit_albu_slice',
-#                        help="output_images location")
-#    parser.add_argument('--slice_x', type=int, default=1300)
-#    parser.add_argument('--slice_y', type=int, default=1300)
-#    parser.add_argument('--stride_x', type=int, default=1200)
-#    parser.add_argument('--stride_y', type=int, default=1200)
-#    args = parser.parse_args()
-#
-#    if not os.path.exists(args.out_dir):
-#        os.mkdir(args.out_dir)
-#
-#    df_pos = slice_ims(args.im_dir, args.out_dir, args.slice_x, args.slice_y, 
-#                    args.stride_x, args.stride_y,
-#                    pos_columns = ['idx', 'name', 'xmin', 
-#                                   'ymin', 'slice_x', 
-#                                   'slice_y', 'im_x', 'im_y'],
-#                    verbose=True)
+    # # construct the argument parse and parse the arguments
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--im_dir', type=str, default='',
+    #                     help="images location")
+    # parser.add_argument('--out_dir', type=str, default='',
+    #                     help="output_images location")
+    # parser.add_argument('--slice_x', type=int, default=1300)
+    # parser.add_argument('--slice_y', type=int, default=1300)
+    # parser.add_argument('--stride_x', type=int, default=1200)
+    # parser.add_argument('--stride_y', type=int, default=1200)
+    # args = parser.parse_args()
 
+    # if not os.path.exists(args.out_dir):
+    #     os.mkdir(args.out_dir)
+
+    # df_pos = slice_ims(args.im_dir, args.out_dir, args.slice_x, args.slice_y, 
+    #                 args.stride_x, args.stride_y,
+    #                 pos_columns = ['idx', 'name', 'xmin', 
+    #                               'ymin', 'slice_x', 
+    #                               'slice_y', 'im_x', 'im_y'],
+    #                 verbose=True)
 
     # use config file
-    # use config file? 
-    from config import Config
     import json
     parser = argparse.ArgumentParser()
     parser.add_argument('config_path')
@@ -174,29 +171,24 @@ if __name__ == '__main__':
         config = Config(**cfg)
 
     # get input dir
-    path_images_8bit = os.path.join(config.path_data_root, config.test_data_refined_dir)
+    path_images_8bit = os.path.join(config.test_data_refined_dir)
 
     # make output dirs
     # first, results dir
     res_dir = os.path.join(config.path_results_root, config.test_results_dir)
     os.makedirs(res_dir, exist_ok=True)
     path_tile_df_csv = os.path.join(config.path_results_root, config.test_results_dir, config.tile_df_csv)
-    path_tile_df_csv2 = os.path.join(config.path_data_root, os.path.dirname(config.test_sliced_dir), config.tile_df_csv)
+    # path_tile_df_csv2 = os.path.join(config.path_data_root, os.path.dirname(config.test_sliced_dir), config.tile_df_csv)
 
     # path for sliced data
-    path_sliced = os.path.join(config.path_data_root, config.test_sliced_dir)
-    print ("Output path for sliced images:", path_sliced)
+    path_sliced = config.test_sliced_dir
+    # path_sliced = os.path.join(config.path_data_root, config.test_sliced_dir)
+    print("Output path for sliced images:", path_sliced)
     
-    #if not os.path.exists(config.results_dir):
-    #    os.mkdir(config.results_dir)
-    #if not os.path.exists(config.path_sliced):
-    #    os.mkdir(config.path_sliced)
-    
-    # only run if nonzer tile and sliced_dir
+    # only run if nonzero tile and sliced_dir
     if (len(config.test_sliced_dir) > 0) and (config.slice_x > 0):
         os.makedirs(path_sliced, exist_ok=True)
    
-
         df_pos = slice_ims(path_images_8bit, path_sliced, 
                        config.slice_x, config.slice_y, 
                        config.stride_x, config.stride_y,
@@ -206,30 +198,11 @@ if __name__ == '__main__':
                        verbose=True)
         # save to file
         df_pos.to_csv(path_tile_df_csv)
-        print ("df saved to file:", path_tile_df_csv)
+        print("df saved to file:", path_tile_df_csv)
         # also csv save to data dir
-        df_pos.to_csv(path_tile_df_csv2)
+        # df_pos.to_csv(path_tile_df_csv2)
 
 
-#    # iterate through im_dir and gather files 
-#    im_arr = []
-#    name_arr = []
-#    mask_arr = []
-#    im_roots = [z for z in os.listdir(args.im_dir) of z.endswith('.tif')]
-#    for i,im_root in enumerate(im_roots):
-#        im_file_name = os.path.join(im_dir, im_root)
-#        im = cv2.imread(im_file_name, 1)
-#        name_arr.append(im_file_name)
-#        im_arr.append(im)
-#        
-#    # slice
-#    df_pos, name_out_arr, im_out_arr, mask_out_arr = \
-#        basiss.slice_ims(im_arr, mask_arr, names_arr, 
-#                    args.slice_x, args.slice_y, 
-#                    args.stride_x, args.stride_y,
-#                    pos_columns = ['idx', 'name', 'xmin', 
-#                                   'ymin', 'slice_x', 
-#                                   'slice_y', 'im_x', 'im_y'],
-#                    verbose=True)
-    
-
+ ###############################################################################
+if __name__ == '__main__':
+    main()

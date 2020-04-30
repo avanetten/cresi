@@ -5,7 +5,7 @@ import os
 
 # import relative paths
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from jsons.config import Config
+from configs.config import Config
 
 
 def get_csv_folds(path, d, use_all=False):
