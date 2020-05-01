@@ -9,9 +9,8 @@ Inspired by:
     https://github.com/SpaceNetChallenge/RoadDetector/blob/master/albu-solution/src/skeleton.py
 """
 
-from skimage.morphology import skeletonize, remove_small_objects, remove_small_holes
+from skimage.morphology import skeletonize, remove_small_objects, remove_small_holes, medial_axis
 from skimage.morphology import erosion, dilation, opening, closing, disk
-from skimage.feature import blob_dog, blob_log, blob_doh
 import numpy as np
 from scipy import ndimage as ndi
 from matplotlib.pylab import plt
@@ -34,7 +33,7 @@ import scipy.spatial
 import skimage.io 
 import cv2
 
-from utils import make_logger, medial_axis_weight
+from utils import make_logger
 from configs.config import Config
 wkt_to_G = __import__('05_wkt_to_G')
 
@@ -232,8 +231,6 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
         print("Time to smooth contours:", t3-t2, "seconds")
     
     # skeletonize
-    #medial = medial_axis(final_mask)
-    #medial_int = medial.astype(np.uint8)
     medial_int = medial_axis(final_mask).astype(np.uint8)
     if verbose:
         print("Time to compute medial_axis:", time.time() - t3, "seconds")
@@ -683,14 +680,10 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
     else:
         if verbose:
             print("running updated skimage.medial_axis...")
-        ske = medial_axis_weight.medial_axis_weight(
-                img, weight_arr=weight_arr,
-                return_distance=False).astype(np.uint16)
-        # ske = skimage.morphology.medial_axis(img).astype(np.uint16)
+        ske = skimage.morphology.medial_axis(img).astype(np.uint16)
         t3 = time.time()
         if verbose:
-            print("Time to run medial_axis_weight():", t3-t2, "seconds")
-        # print("Time to run skimage.medial_axis():", t3-t2, "seconds")
+            print("Time to run skimage.medial_axis():", t3-t2, "seconds")
 
     if fix_borders:
         if verbose:
