@@ -17,6 +17,8 @@ from osgeo import gdal, ogr, osr
 import cv2
 import os
 import random
+import skimage
+import skimage.io
 import subprocess
 import shapely
 from shapely.geometry import MultiLineString
@@ -177,6 +179,7 @@ def plot_node_ids(G, ax, node_list=[], alpha=0.8, fontsize=8, plot_node=False, n
         
     return ax
 
+
 ###############################################################################
 def get_graph_extent(G_):
     '''min and max x and y'''
@@ -187,9 +190,25 @@ def get_graph_extent(G_):
     dx, dy = xmax-xmin, ymax-ymin   
     return xmin, xmax, ymin, ymax, dx, dy
 ###############################################################################
-###############################################################################
+    
 
+###############################################################################
 ### Conversion and data formatting functions
+###############################################################################    
+
+
+###############################################################################
+def CreateMultiBandGeoTiff(Array, Name):
+    '''Thanks Jake'''
+    driver=gdal.GetDriverByName('GTiff')
+    DataSet = driver.Create(Name, Array.shape[2], Array.shape[1], 
+                            Array.shape[0], gdal.GDT_Byte)
+    for i, image in enumerate(Array, 1):
+        DataSet.GetRasterBand(i).WriteArray( image )
+    del DataSet
+    return Name
+
+
 ###############################################################################
 def convert_to_8Bit(inputRaster, outputRaster,
                            outputPixType='Byte',
@@ -622,8 +641,16 @@ def get_road_buffer(geoJson, im_vis_file, output_raster,
     Assumes in_vis_file is an 8-bit RGB file.
     Returns geodataframe and ouptut mask.
     '''
-    
-     
+ 
+    # if geoJson DNE, make black
+    if not os.path.exists(geoJson):
+        print("geojson DNE, creating blank mask")
+        mask_gray = np.zeros(skimage.io.imread(im_vis_file, as_gray=True).shape)
+        # mask_gray = np.zeros(cv2.imread(im_vis_file, 0).shape)
+        gdf_buffer = []
+        cv2.imwrite(output_raster, mask_gray)   
+        return mask_gray, gdf_buffer
+
     gdf_buffer = create_buffer_geopandas(geoJson,
                                          bufferDistanceMeters=buffer_meters,
                                          bufferRoundness=bufferRoundness, 
@@ -638,6 +665,7 @@ def get_road_buffer(geoJson, im_vis_file, output_raster,
         gdf_to_array(gdf_buffer, im_vis_file, output_raster, 
                                           burnValue=burnValue,
                                           verbose=verbose)
+        
     # load mask
     mask_gray = cv2.imread(output_raster, 0)
     

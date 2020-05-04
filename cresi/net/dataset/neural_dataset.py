@@ -18,13 +18,13 @@ class Dataset:
     have its own cropper
     """
     def __init__(self, image_provider: AbstractImageProvider, image_indexes, 
-                 config, stage='train', transforms=None, verbose=True):
+                 config, stage='train', transforms=None, verbose=False):
         self.pad = 0 if stage=='train' else config.test_pad
         self.image_provider = image_provider
         self.image_indexes = image_indexes if isinstance(image_indexes, list) \
                         else image_indexes.tolist()
         if verbose:
-            print("nueral_dataset.py - Dataset - len imaage_indexes:", len(self.image_indexes))
+            print("nueral_dataset.py - Dataset - len image_indexes:", len(self.image_indexes))
         self.stage = stage
         self.keys = {'image', 'image_name'}
         self.config = config
@@ -57,7 +57,7 @@ class TrainDataset(Dataset):
     dataset for training with random crops
     """
     def __init__(self, image_provider, image_indexes, config, stage='train', 
-                 transforms=None, partly_sequential=False, verbose=True):
+                 transforms=None, partly_sequential=False, verbose=False):
         super(TrainDataset, self).__init__(image_provider, image_indexes, 
              config, stage, transforms=transforms)
         self.keys.add('mask')

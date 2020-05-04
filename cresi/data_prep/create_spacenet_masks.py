@@ -60,8 +60,8 @@ rescale = {
             6: [36, 1505], 
             7: [17, 1853], 
             8: [7, 1559]}
-
 }
+
 
 ###############################################################################
 def gamma_correction(image, gamma=1.66):
@@ -74,6 +74,7 @@ def gamma_correction(image, gamma=1.66):
  
     # apply gamma correction using the lookup table
     return cv2.LUT(image, table)
+
 
 ###############################################################################
 def calc_rescale(im_file_raw, m, percentiles):
@@ -229,6 +230,7 @@ def main():
 
         #for k, v in m.items():
         #    print(test_data_name, k, np.mean(v, axis=0))
+
 
 ###############################################################################
 if __name__ == "__main__":

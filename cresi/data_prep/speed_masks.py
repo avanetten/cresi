@@ -20,6 +20,20 @@ import warnings
 
 
 ###############################################################################
+def gauss_blur_arr(in_arr, kernel_blur=7):
+    '''Assume shape is (channels, h, w)'''
+
+    n_channels, h, w = in_arr.shape
+    out_arr = np.zeros(in_arr.shape)
+    for band in range(n_channels):
+        im_channel = in_arr[band, :, :]
+        im_blur = cv2.GaussianBlur(im_channel, (kernel_blur, kernel_blur), 0)
+        out_arr[band, :, :] = im_blur
+        
+    return out_arr
+        
+        
+###############################################################################
 def convert_array_to_multichannel(in_arr, n_channels=7, burnValue=255, 
                                   append_total_band=False, verbose=False):
     '''Take input array with multiple values, and make each value a unique
@@ -71,6 +85,7 @@ def CreateMultiBandGeoTiff(OutPath, Array):
     return OutPath
 
 
+
 ###############################################################################
 def speed_mask_dir(geojson_dir, image_dir, output_dir,
                              speed_to_burn_func,
@@ -86,6 +101,8 @@ def speed_mask_dir(geojson_dir, image_dir, output_dir,
                              n_channels=8,
                              channel_burnValue=255,
                              append_total_band=True,
+                             label_type='SN5',
+                             crs=None,
                              ):
     """Create continuous speed masks for entire dir"""
 
@@ -99,13 +116,26 @@ def speed_mask_dir(geojson_dir, image_dir, output_dir,
         mask_path_out = os.path.join(output_dir, image_name)
 
         # Get geojson path
-        # SpaceNet chips
-        geojson_path = os.path.join(
-            geojson_dir, image_root.replace('PS-RGB', 'geojson_roads_speed').replace('PS-MS', 'geojson_roads_speed')
-            # geojson_dir, image_root.replace('PS-RGB', 'geojson_roads_speed')
-            + '.geojson')
-        # # Contiguous files
-        # geojson_path = os.path.join(geojson_dir, image_root + '.geojson')
+        
+        if label_type == 'SN3' or label_type == 'SN5': 
+            # SpaceNet chips
+            geojson_path = os.path.join(
+                geojson_dir, image_root.replace('PS-RGB', 'geojson_roads_speed').replace('PS-MS', 'geojson_roads_speed')
+                # geojson_dir, image_root.replace('PS-RGB', 'geojson_roads_speed')
+                + '.geojson')
+            # # Contiguous files
+            # geojson_path = os.path.join(geojson_dir, image_root + '.geojson')
+        elif label_type == 'SN4':
+            # example im: Pan-Sharpen_Atlanta_nadir7_catid_1030010003D22F00_748451_3743589.tif
+            # example json: spacenet-roads_748451_3743589_speed.geojson
+            name_root = '_'.join(image_root.split('_')[-2:])
+            geojson_path = os.path.join(geojson_dir,
+                                        'spacenet-roads_' + name_root + '_speed.geojson')
+        
+        else:
+            print("Uknown label type (expecting SN3, SN4 or SN5)', returning...")
+            return
+        
         # if (j % 100) == 0:
         if (j % 1) == 0:
             print(j+1, "/", len(images), "image:", image_name,
@@ -120,6 +150,7 @@ def speed_mask_dir(geojson_dir, image_dir, output_dir,
             buffer_roundness=buffer_roundness,
             dissolve_by=dissolve_by,
             bin_conversion_key=bin_conversion_key,
+            crs=crs,
             verbose=verbose)
 
         # If Binning...
@@ -167,19 +198,40 @@ def main():
                         help='location of geojson labels')
     parser.add_argument('--image_dir', default='', type=str,
                         help='location of geotiffs')
-    parser.add_argument('--output_conversion_csv', default='', type=str,
+    parser.add_argument('--output_conversion_csv_contin', default='', type=str,
                         help='location of output conversion file')
-    parser.add_argument('--output_mask_dir', default='', type=str,
+    parser.add_argument('--output_mask_dir_contin', default='', type=str,
                         help='location of output masks')
+    parser.add_argument('--output_conversion_csv_binned', default='', type=str,
+                        help='location of output conversion file')
     parser.add_argument('--output_mask_multidim_dir', default='', type=str,
                         help='location of output masks for binned case '
                         ' set to '' to use continuous case')
-    parser.add_argument('--buffer_distance_meters', default=2, type=int,
-                        help='width of road buffer in meters')
+    parser.add_argument('--buffer_distance_meters', default=2, type=float,
+                        help='Mask buffer')
+#    parser.add_argument('--output_conversion_csv_contin', default='', type=str,
+#                        help='location of output conversion file')
+#    parser.add_argument('--output_mask_dir_contin', default='', type=str,
+#                        help='location of output masks')
+#    parser.add_argument('--output_conversion_csv_binned', default='', type=str,
+#                        help='location of output conversion file')
+#    parser.add_argument('--output_mask_multidim_dir', default='', type=str,
+#                        help='location of output masks for binned case '
+#                        ' set to '' to use continuous case')
+    parser.add_argument('--label_type', default='SN5', type=str,
+                        help='SpaceNet data label formate (SN3, SN4, or SN5)')
+    parser.add_argument('--crs', default='None', type=str,
+                        help='crs of input data, use None to compute it '
+                        'SN4 Atlanta is EPSG::32616')
     args = parser.parse_args()
 
+    if args.crs == 'None':
+        args.crs = None
+        
+    # ATLANTA
+    # args.crs = {'init': 'epsg:32616'}
+    
     # hardcoded for now...
-    buffer_distance_meters = args.buffer_distance_meters
     buffer_roundness = 1
     mask_burn_val_key = 'burnValue'
     dissolve_by = 'inferred_speed_mps'  # 'speed_m/s'
@@ -191,13 +243,16 @@ def main():
     # ignore skimage warnings
     warnings.filterwarnings("ignore")
 
+    # CREATE CONVERSION CSVS
+    
     ###########################################################################
     # CONTINUOUS
     ###########################################################################
     if len(args.output_mask_multidim_dir) == 0:
-        min_road_burn_val = 0
-        min_speed_contin = 0
-        max_speed_contin = 65
+                    
+        min_road_burn_val = 0   # 80  #50  # 127
+        min_speed_contin = 0  # 15   #15
+        max_speed_contin = 65  # 65
         mask_max = 255
         verbose = True
         # placeholder variables for binned case
@@ -205,7 +260,7 @@ def main():
             = 0, 0, 0, 0
 
         # make output dir
-        os.makedirs(args.output_mask_dir, exist_ok=True)
+        os.makedirs(args.output_mask_dir_contin, exist_ok=True)
 
         #######################################################################
         def speed_to_burn_func(speed):
@@ -221,45 +276,67 @@ def main():
         df_s = pd.DataFrame(d)
 
         # make conversion dataframe (optional)
-        if not os.path.exists(args.output_conversion_csv):
+        if not os.path.exists(args.output_conversion_csv_contin):
             print("Write burn_val -> speed conversion to:",
-                  args.output_conversion_csv)
-            df_s.to_csv(args.output_conversion_csv)
+                  args.output_conversion_csv_contin)
+            df_s.to_csv(args.output_conversion_csv_contin)
         else:
             print("path already exists, not overwriting...",
-                  args.output_conversion_csv)
+                  args.output_conversion_csv_contin)
+
+
 
     ###########################################################################
-    # BINNED
+    # BINNED 10
     ###########################################################################
     else:
+        
         min_speed_bin = 1
         max_speed_bin = 65
-        bin_size_mph = 10.0
         channel_burnValue = 255
         channel_value_mult = 1
         append_total_band = True
+        speed_arr_bin = np.arange(min_speed_bin, max_speed_bin + 1, 1)
 
         # make output dir
-        os.makedirs(args.output_mask_dir, exist_ok=True)
-        os.makedirs(args.output_mask_multidim_dir, exist_ok=True)
+        if len(args.output_mask_dir_contin) > 0:
+            os.makedirs(args.output_mask_dir_contin, exist_ok=True)
+        if len(args.output_mask_multidim_dir) > 0:            
+            os.makedirs(args.output_mask_multidim_dir, exist_ok=True)
 
+        # # BINNED 10
+        # #######################################################################
+        # def speed_to_burn_func(speed_mph):
+        #     '''bin every 10 mph or so
+        #     Convert speed estimate to appropriate channel
+        #     bin = 0 if speed = 0'''
+        #     speed_bins = [10, 15, 18.75, 20, 25, 30, 35, 45, 55, 65]
+        #     for i, speed_tmp in enumerate(speed_bins):
+        #         if speed_mph <= speed_tmp:
+        #             return int(255 * float(i + 1) / len(speed_bins))
+        # # determine num_channels
+        # n_channels = len(np.unique([int(speed_to_burn_func(z)) for z in speed_arr_bin]))
+ 
+        # BINNED 7
         #######################################################################
+        bin_size_mph = 10.0
         def speed_to_burn_func(speed_mph):
             '''bin every 10 mph or so
             Convert speed estimate to appropriate channel
             bin = 0 if speed = 0'''
             return int( int(math.ceil(speed_mph / bin_size_mph)) * channel_value_mult) 
-
         # determine num_channels
-        n_channels = int(speed_to_burn_func(max_speed_bin))
+        n_channels = len(np.unique([int(speed_to_burn_func(z)) for z in speed_arr_bin]))
+        # n_channels = int(speed_to_burn_func(max_speed_bin))
+        
         print("n_channels:", n_channels)
         # update channel_value_mult
         channel_value_mult = int(255/n_channels)
 
         # make conversion dataframe
-        speed_arr_bin = np.arange(min_speed_bin, max_speed_bin + 1, 1)
+        print("speed_arr_bin:", speed_arr_bin)
         burn_val_arr = np.array([speed_to_burn_func(s) for s in speed_arr_bin])
+        print("burn_val_arr:", burn_val_arr)
         d = {'burn_val': burn_val_arr, 'speed': speed_arr_bin}
         df_s_bin = pd.DataFrame(d)
         # add a couple columns, first the channel that the speed corresponds to
@@ -268,23 +345,22 @@ def main():
         df_s_bin['channel'] = channel_val
         # burn_uni = np.sort(np.unique(burn_val_arr))
         # print ("burn_uni:", burn_uni)
-        if not os.path.exists(args.output_conversion_csv):
+        if not os.path.exists(args.output_conversion_csv_binned):
             print("Write burn_val -> speed conversion to:",
-                  args.output_conversion_csv)
-            df_s_bin.to_csv(args.output_conversion_csv)
+                  args.output_conversion_csv_binned)
+            df_s_bin.to_csv(args.output_conversion_csv_binned)
         else:
             print("path already exists, not overwriting...",
-                  args.output_conversion_csv)
+                  args.output_conversion_csv_binned)
 
-    ###########################################################################
     ###########################################################################
 
     ###########################################################################
     speed_mask_dir(args.geojson_dir, args.image_dir,
-                   args.output_mask_dir,
+                   args.output_mask_dir_contin,
                    speed_to_burn_func,
                    mask_burn_val_key=mask_burn_val_key,
-                   buffer_distance_meters=buffer_distance_meters,
+                   buffer_distance_meters=args.buffer_distance_meters,
                    buffer_roundness=buffer_roundness,
                    dissolve_by=dissolve_by,
                    bin_conversion_key=bin_conversion_key,
@@ -295,6 +371,8 @@ def main():
                    n_channels=n_channels,
                    channel_burnValue=channel_burnValue,
                    append_total_band=append_total_band,
+                   label_type=args.label_type,
+                   crs=args.crs
                    )
 
 

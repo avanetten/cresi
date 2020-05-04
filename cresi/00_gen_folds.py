@@ -6,7 +6,7 @@ import json
 import argparse
 from random import shuffle
 random.seed(42)
-from jsons.config import Config
+from configs.config import Config
 
 
 def main():
@@ -21,11 +21,12 @@ def main():
     
     ###################
     # set paths
-    path_images_8bit_train = os.path.join(config.path_data_root, config.train_data_refined_dir_ims)
-    # path_images_8bit_train = os.path.join(config.path_data_root, config.train_data_refined_dir, 'images')
-    print ("gen+folds.py: path_images_8bit_train:", path_images_8bit_train)
-    files = os.listdir(path_images_8bit_train)
-    print ("files[:10]:", files[:10])
+    paths_images_train = config.train_data_refined_dir_ims.split(',')
+    print("00_gen_folds.py: path_images_train:", paths_images_train)
+    train_files = []
+    for p in paths_images_train:
+        train_files.extend(os.listdir(p))
+    print("train_files[:10]:", train_files[:10])
     weight_save_path = os.path.join(config.path_results_root, 'weights', config.save_weights_dir)
     os.makedirs(weight_save_path, exist_ok=True)
     folds_save_path = os.path.join(weight_save_path, config.folds_file_name)
@@ -37,18 +38,10 @@ def main():
     else:
         print ("folds_save_path:", folds_save_path)
 
-        # # set values
-        # if config.num_channels == 3:
-        #     image_format_path = 'RGB-PanSharpen'
-        # else:
-        #     image_format_path = 'MUL-PanSharpen'
-        # imfile_prefix = image_format_path + '_'
-        ###################    
-
-        shuffle(files)
+        shuffle(train_files)
     
-        s = {k.split('_')[0] for k in files}
-        d = {k: [v for v in files] for k in s}
+        s = {k.split('_')[0] for k in train_files}
+        d = {k: [v for v in train_files] for k in s}
     
         folds = {}
     

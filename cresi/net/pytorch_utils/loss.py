@@ -61,7 +61,7 @@ def dice(preds, trues, weight=None, is_average=True):
     return torch.clamp(score, 0., 1.)
 
 
-def focal(preds, trues, alpha=1, gamma=2, reduce=True, logits=True):
+def focal_v0(preds, trues, alpha=1, gamma=2, reduce=True, logits=True):
     '''https://www.kaggle.com/c/tgs-salt-identification-challenge/discussion/65938'''
     if logits:
         BCE_loss = F.binary_cross_entropy_with_logits(preds, trues)#, reduce=False)
@@ -81,7 +81,8 @@ def soft_dice_loss(outputs, targets, per_image=False):
     From cannab sn4
     '''
     
-    batch_size = outputs.size()[0]
+    batch_size = outputs.size()
+    # batch_size = outputs.size()[0]
     eps = 1e-5
     if not per_image:
         batch_size = 1
@@ -132,7 +133,7 @@ def dice_cannab_v0(im1, im2, empty_score=1.0):
     return 2. * intersection.sum() / im_sum
 
 
-def focal_cannab(outputs, targets, gamma=2,  ignore_index=255):
+def focal(outputs, targets, gamma=2,  ignore_index=255):
     '''From cannab sn4'''
     outputs = outputs.contiguous()
     targets = targets.contiguous()

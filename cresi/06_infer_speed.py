@@ -5,14 +5,13 @@ Created on Tue Feb 12 11:04:33 2019
 
 @author: avanetten
 
-See _arr_slicing.ipynb for tests
-
 """
 
 import os
 import sys
 import cv2
 import time
+import shapely
 import logging
 import skimage.io
 import numpy as np
@@ -26,13 +25,17 @@ import matplotlib
 matplotlib.use('agg')
 from matplotlib import collections as mpl_collections
 import matplotlib.pyplot as plt
-from jsons.config import Config
+from configs.config import Config
 import argparse
 import json
+from multiprocessing.pool import Pool
+
 
 from utils import make_logger
+from utils import apls_plots
 
 logger1 = None
+
 
 ###############################################################################
 def weighted_avg_and_std(values, weights):
@@ -68,7 +71,7 @@ def get_nearest_key(dic, val):
     myList = dic
     key = min(myList, key=lambda x:abs(x-val))
     return key
-    
+
 
 ###############################################################################
 def load_speed_conversion_dict_binned(csv_loc, speed_increment=5):
@@ -119,7 +122,6 @@ def load_speed_conversion_dict_binned(csv_loc, speed_increment=5):
     dic[6] = 65  # 65 mph speed limit is ubiquitous
     ########## 
     
-    
     return df_, dic
 
 
@@ -166,16 +168,14 @@ def get_patch_speed_singlechannel(patch, conv_dict, percentile=80,
         logger1.info("key: " + str(key))
         logger1.info("speed: " + str(speed))
     
-
-#    ########## 
-#    # OPTIONAL
-#    # bin to 10mph bins
-#    myList = [7.5,17.5, 25, 35, 45, 55, 65]
-#    speed = min(myList, key=lambda x:abs(x-speed))
-#    ########## 
+    # ########## 
+    # # OPTIONAL
+    # # bin to 10mph bins
+    # myList = [7.5,17.5, 25, 35, 45, 55, 65]
+    # speed = min(myList, key=lambda x:abs(x-speed))
+    # ########## 
     
     return speed, patch_filt
-   
    
 ###############################################################################
 def get_patch_speed_multichannel(patch, conv_dict, min_z=128, 
@@ -238,10 +238,11 @@ def get_patch_speed_multichannel(patch, conv_dict, min_z=128,
                        
     return speed_out, z_val_vec
 
+
 ###############################################################################
 def get_edge_time_properties(mask, edge_data, conv_dict,
                              min_z=128, dx=4, dy=4, percentile=80,
-                             use_totband=True, use_weighted_mean=True,
+                             max_speed_band=-2, use_weighted_mean=True,
                              variable_edge_speed=False,
                              verbose=False):
     '''
@@ -280,8 +281,12 @@ def get_edge_time_properties(mask, edge_data, conv_dict,
     wkt_pix = edge_data['wkt_pix']
     #geom_pix = shapely.wkt.loads(wkt_pix)
     geom_pix = edge_data['geometry_pix']
+    if type(geom_pix) == str:
+        # print("geom actually a string:", geom_pix)
+        geom_pix = shapely.wkt.loads(wkt_pix)
     # get points
     coords = list(geom_pix.coords)
+    
     if verbose:
         logger1.info("type geom_pix: " + str(type(geom_pix))  )          
         logger1.info("wkt_pix: " + str(wkt_pix))
@@ -317,10 +322,12 @@ def get_edge_time_properties(mask, edge_data, conv_dict,
         # multichannel case...
         if multichannel:
             patch = mask[:, y0:y1, x0:x1]
-            if use_totband:
-                # assume the final channel is total, so cut it out
-                nchannels, h, w = mask.shape
-                patch = patch[:nchannels-1,:,:]
+            nchannels, h, w = mask.shape
+            if max_speed_band < nchannels - 1:
+                patch = patch[:max_speed_band+1, :, :]
+                # # assume the final channel is total, so cut it out
+                # nchannels, h, w = mask.shape
+                # patch = patch[:nchannels-1,:,:]
             if verbose:
                 logger1.info("  patch.shape: " + str(patch.shape))
             # get estimated speed of mask patch
@@ -389,10 +396,87 @@ def get_edge_time_properties(mask, edge_data, conv_dict,
 
 
 ###############################################################################
-def infer_travel_time(G_, mask, conv_dict,   
+def infer_travel_time(params):
+    '''Get an estimate of the average speed and travel time of each edge
+    in the graph from the mask and conversion dictionary
+    For each edge, get the geometry in pixel coords
+      For each point, get the neareast neighbors in the maks and infer 
+      the local speed'''
+
+    G_, mask, conv_dict, min_z, dx, dy, \
+                      percentile, \
+                      max_speed_band, use_weighted_mean, \
+                      variable_edge_speed, \
+                      verbose, \
+                      out_file,\
+                      save_shapefiles, im_root, graph_dir_out \
+    = params
+    print("im_root:", im_root)
+    
+    mph_to_mps = 0.44704   # miles per hour to meters per second
+    pickle_protocol = 4
+    
+    for i,(u, v, edge_data) in enumerate(G_.edges(data=True)):
+        if verbose: #(i % 100) == 0:
+            logger1.info("\n" + str(i) + " " + str(u) + " " + str(v) + " " \
+                         + str(edge_data))
+        if (i % 1000) == 0:
+            logger1.info(str(i) + " / " + str(len(G_.edges())) + " edges")
+
+        tot_hours, mean_speed_mph, length_miles = \
+                get_edge_time_properties(mask, edge_data, conv_dict,
+                             min_z=min_z, dx=dx, dy=dy,
+                             percentile=percentile,
+                             max_speed_band=max_speed_band, 
+                             use_weighted_mean=use_weighted_mean,
+                             variable_edge_speed=variable_edge_speed,
+                             verbose=verbose)
+        # update edges
+        edge_data['Travel Time (h)'] = tot_hours
+        edge_data['inferred_speed_mph'] = np.round(mean_speed_mph, 2)
+        edge_data['length_miles'] = length_miles
+        edge_data['inferred_speed_mps'] = np.round(mean_speed_mph * mph_to_mps, 2)
+        edge_data['travel_time_s'] = np.round(3600. * tot_hours, 3)
+        # edge_data['travel_time'] = np.round(3600. * tot_hours, 3)
+
+    G = G_.to_undirected()
+    # save graph
+    #logger1.info("Saving graph to directory: " + graph_dir)
+    #out_file = os.path.join(graph_dir_out, image_name.split('.')[0] + '.gpickle')
+    nx.write_gpickle(G, out_file, protocol=pickle_protocol)
+
+    # save shapefile as well?
+    if save_shapefiles:
+        # print("save shapefiles")
+        # print("current crs:", G.graph['crs'])
+        G_out = G
+        logger1.info("Saving shapefile to directory: {}".format(graph_dir_out))
+        ox.save_graph_shapefile(G_out, filename=im_root, folder=graph_dir_out,
+                                encoding='utf-8')
+        
+        # save just terminal points too?
+        fout = graph_dir_out +'_terminal'
+        deg = dict(G_out.degree())
+        non_terminal_nodes = [i for i, d in deg.items() if d != 1]
+        G_out.remove_nodes_from(non_terminal_nodes)
+        # print("G_out.nodes():", G_out.nodes())
+        # osmnx is stupid and fails, so add one edge
+        u, v = list(G_out.nodes())[0], list(G_out.nodes())[1]
+        G_out.add_edge(u, v)
+        # print("len G.edges():", len(G_out.edges()))
+
+        ox.save_graph_shapefile(G_out, filename=im_root, 
+                                folder=fout,
+                                encoding='utf-8')
+
+    return G_
+
+
+###############################################################################
+def infer_travel_time_single_threaded(G_, mask, conv_dict,   
                       min_z=128, dx=4, dy=4,
                       percentile=90,
-                      use_totband=True, use_weighted_mean=True,
+                      max_speed_band=-2, use_weighted_mean=True,
                       variable_edge_speed=False,
                       verbose=False):
 
@@ -415,7 +499,7 @@ def infer_travel_time(G_, mask, conv_dict,
                 get_edge_time_properties(mask, edge_data, conv_dict,
                              min_z=min_z, dx=dx, dy=dy,
                              percentile=percentile,
-                             use_totband=use_totband, 
+                             max_speed_band=max_speed_band, 
                              use_weighted_mean=use_weighted_mean,
                              variable_edge_speed=variable_edge_speed,
                              verbose=verbose)
@@ -433,11 +517,13 @@ def infer_travel_time(G_, mask, conv_dict,
 ###############################################################################
 def add_travel_time_dir(graph_dir, mask_dir, conv_dict, graph_dir_out,
                       min_z=128, dx=4, dy=4, percentile=90,
-                      use_totband=True, use_weighted_mean=True,
+                      max_speed_band=-2, use_weighted_mean=True,
                       variable_edge_speed=False, mask_prefix='',
                       save_shapefiles=True,
+                      n_threads=12,
                       verbose=False):
     '''Update graph properties to include travel time for entire directory'''
+    t0 = time.time()
     pickle_protocol = 4     # 4 is most recent, python 2.7 can't read 4
 
     logger1.info("Updating graph properties to include travel time")
@@ -445,6 +531,10 @@ def add_travel_time_dir(graph_dir, mask_dir, conv_dict, graph_dir_out,
     os.makedirs(graph_dir_out, exist_ok=True)
     
     image_names = sorted([z for z in os.listdir(mask_dir) if z.endswith('.tif')])
+    nfiles = len(image_names)
+    n_threads = min(n_threads, nfiles)
+
+    params = []
     for i,image_name in enumerate(image_names):
         im_root = image_name.split('.')[0]
         if len(mask_prefix) > 0:
@@ -457,9 +547,10 @@ def add_travel_time_dir(graph_dir, mask_dir, conv_dict, graph_dir_out,
         graph_path = os.path.join(graph_dir,  im_root + '.gpickle')
         
         if not os.path.exists(graph_path):
-            logger1.info("  ", i, "DNE, skipping: " + str(graph_path))
-            return
-            # continue
+            # print("  ", str(i), "DNE, skipping: " + str(graph_path))
+            logger1.info("  " + str(i) + "DNE, skipping: " + str(graph_path))
+            # return
+            continue
             
         if verbose:
             logger1.info("mask_path: " + mask_path)
@@ -472,203 +563,25 @@ def add_travel_time_dir(graph_dir, mask_dir, conv_dict, graph_dir_out,
         if len(G_raw.nodes()) == 0:
             nx.write_gpickle(G_raw, out_file, protocol=pickle_protocol)
             continue
-        
-        G = infer_travel_time(G_raw, mask, conv_dict,
-                             min_z=min_z, dx=dx, dy=dy,
-                             percentile=percentile,
-                             use_totband=use_totband, 
-                             use_weighted_mean=use_weighted_mean,
-                             variable_edge_speed=variable_edge_speed,
-                             verbose=verbose)
-        G = G.to_undirected()
-        # save graph
-        #logger1.info("Saving graph to directory: " + graph_dir)
-        #out_file = os.path.join(graph_dir_out, image_name.split('.')[0] + '.gpickle')
-        nx.write_gpickle(G, out_file, protocol=pickle_protocol)
-
-        # save shapefile as well?
-        if save_shapefiles:
-            G_out = G # ox.simplify_graph(G.to_directed())
-            logger1.info("Saving shapefile to directory: {}".format(graph_dir_out))
-            ox.save_graph_shapefile(G_out, filename=im_root, folder=graph_dir_out,
-                                    encoding='utf-8')
-            #out_file2 = os.path.join(graph_dir, image_id.split('.')[0] + '.graphml')
-            #ox.save_graphml(G, image_id.split('.')[0] + '.graphml', folder=graph_dir)
-
-
+    
+        params.append((G_raw, mask, conv_dict, min_z, dx, dy, \
+                      percentile, \
+                      max_speed_band, use_weighted_mean, \
+                      variable_edge_speed, \
+                      verbose, \
+                      out_file,
+                      save_shapefiles, im_root, graph_dir_out))
+    
+    # exectute
+    if n_threads > 1:
+        pool = Pool(n_threads)
+        pool.map(infer_travel_time, params)
+    else:
+        infer_travel_time(params[0])
+    
+    tf = time.time()
+    print("Time to infer speed:", tf-t0, "seconds")
     return
-
-
-###############################################################################
-def plot_graph_on_im_yuge(G_, im_test_file, figsize=(12,12), show_endnodes=False,
-                     width_key='inferred_speed_mps', 
-                     width_mult=0.125, 
-                     default_node_size=15,
-                     node_color='#0086CC', # cosmiq logo color (blue)
-                     edge_color='#00a6ff',
-                     #node_color='#66ccff', 
-                     #edge_color='#999999',
-                     node_edgecolor='none',
-                     title='', figname='', 
-                     max_speeds_per_line=12,  
-                     line_alpha=0.5, node_alpha=0.6,
-                     default_dpi=300, plt_save_quality=75, 
-                     ax=None, verbose=True, super_verbose=False):
-    '''
-    COPIED VERBATIM FROM APLS_TOOLS.PY
-    Overlay graph on image,
-    if width_key == int, use a constant width
-    '''
-
-    # set dpi to approximate native resolution
-    #   mpl can handle a max of 2^29 pixels, or 23170 on a side
-    # recompute max_dpi
-    max_dpi = int(23000 / max(figsize))
-    
-    try:
-        im_cv2 = cv2.imread(im_test_file, 1)
-        img_mpl = cv2.cvtColor(im_cv2, cv2.COLOR_BGR2RGB)   
-    except:
-        img_sk = skimage.io.imread(im_test_file)
-        # make sure image is h,w,channels (assume less than 20 channels)
-        if (len(img_sk.shape) == 3) and (img_sk.shape[0] < 20): 
-            img_mpl = np.moveaxis(img_sk, 0, -1)
-        else:
-            img_mpl = img_sk
-    h, w = img_mpl.shape[:2]
-    
-    # make figsize proportional to shape
-    if h > w:
-        figsize = (figsize[1] * 1.*w/h, figsize[1])
-    elif w > h:
-        figsize = (figsize[0], figsize[0] * 1.*h/w)
-    else:
-        pass
-    
-    if h > 10000 or w > 10000:
-        figsize = (2 * figsize[0], 2 * figsize[1])
-        max_dpi = int(23000 / max(figsize))
-   
-    if verbose:
-        logger1.info("img_mpl.shape: " + str(img_mpl.shape))
-    desired_dpi = max(default_dpi, int( np.max(img_mpl.shape) / np.max(figsize)) )
-    if verbose:
-        logger1.info("desired dpi: " + str(desired_dpi))
-    # max out dpi at 3500
-    dpi = int(np.min([max_dpi, desired_dpi ]))
-    if verbose:
-        logger1.info("figsize: " + str(figsize))
-        logger1.info("plot dpi: " + str(dpi))
-
-
-    node_x, node_y, lines, widths, title_vals  = [], [], [], [], []
-    #node_set = set()
-    x_set, y_set = set(), set()
-    # get edge data
-    for i,(u, v, edge_data) in enumerate(G_.edges(data=True)):
-        #if type(edge_data['geometry_pix'])
-        coords = list(edge_data['geometry_pix'].coords)
-        if super_verbose: #(i % 100) == 0:
-            logger1.info("\n" + str(i) + " " + str(u) + " " + str(v) + " " \
-                         + str(edge_data))
-            logger1.info("edge_data: " + str(edge_data))
-            #logger1.info("  edge_data['geometry'].coords", edge_data['geometry'].coords)
-            logger1.info("  coords: " + str(coords))
-        lines.append( coords ) 
-        
-        # point 0
-        xp = coords[0][0]
-        yp = coords[0][1]
-        if not ((xp in x_set) and (yp in y_set)):
-            node_x.append(xp)
-            x_set.add(xp)
-            node_y.append(yp)
-            y_set.add(yp)
-            
-        # point 1
-        xp = coords[-1][0]
-        yp = coords[-1][1]
-        if not ((xp in x_set) and (yp in y_set)):
-            node_x.append(xp)
-            x_set.add(xp)
-            node_y.append(yp)
-            y_set.add(yp)
-            
-        if type(width_key) == str:
-            if super_verbose:
-                logger1.info("edge_data[width_key]: " + str(edge_data[width_key]))
-            width = int(np.rint(edge_data[width_key] * width_mult))
-            title_vals.append(int(np.rint( edge_data[width_key] )))
-        else:
-            width = width_key
-        widths.append(width)
-
-    # get nodes
-    
-
-    if not ax:
-        fig, ax = plt.subplots(1,1, figsize=figsize)   
-             
-    ax.imshow(img_mpl)
-    # plot segments
-    # scale widths with dpi
-    widths = (default_dpi / float(dpi)) * np.array(widths)
-    lc = mpl_collections.LineCollection(lines, colors=edge_color, 
-                                    linewidths=widths, alpha=line_alpha)#,
-                                    #zorder=2)
-    ax.add_collection(lc)
-
-    # plot nodes?
-    if show_endnodes:
-        # scale size with dpi
-        node_size = max(0.01, (default_node_size * default_dpi / float(dpi)))
-        #node_size = 3
-        if verbose:
-            logger1.info("node_size: " + str(node_size))
-        ax.scatter(node_x, node_y, c=node_color, 
-                   s=node_size, 
-                   alpha=node_alpha, 
-                   #linewidths=None,
-                   edgecolor=node_edgecolor,
-                   zorder=1,
-                   #marker='o' #'.' # marker='o'
-                   )
-    ax.axis('off')
-
-    # title
-    if len(title_vals) > 0:
-        if verbose:
-            logger1.info("title_vals: " + str(title_vals))
-        title_strs = np.sort(np.unique(title_vals)).astype(str)
-        # split title str if it's too long
-        if len(title_strs) > max_speeds_per_line:
-            # construct new title str
-            n, b = max_speeds_per_line, title_strs
-            title_strs = np.insert(b, range(n, len(b), n), "\n")  
-            #title_strs = '\n'.join(s[i:i+ds] for i in range(0, len(s), ds))        
-        if verbose:
-            logger1.info("title_strs: " + str(title_strs))
-        title_new = title + '\n' \
-                + width_key + " = " + " ".join(title_strs)
-    else:
-        title_new = title
-        
-    if title:
-        #plt.suptitle(title)
-        ax.set_title(title_new)
-        
-    plt.tight_layout()
-    if title:
-        plt.subplots_adjust(top=0.96)
-        #plt.subplots_adjust(left=1, bottom=1, right=1, top=1, wspace=5, hspace=5)
-
-    if figname:
-        logger1.info("Saving to: " + str(figname))
-        if dpi > 1000:
-            plt_save_quality = 50
-        plt.savefig(figname, dpi=dpi, quality=plt_save_quality)
-    
-    return ax
 
 
 ###############################################################################
@@ -676,7 +589,6 @@ def test():
     
     '''
     See _arr_slicing.ipynb for better tests'''
-    #conversion_csv_loc = '/raid/data/ave/spacenet/data/spacenetv2/basiss_rgb_8bit_train2/speed_conversion_binned.csv'
     data_dir = '/raid/local/src/cresi/results/resnet34_ave_speed_mc_focal_totband_test_sn3chips'
     mask_dir = os.path.join(data_dir, 'merged')
     graph_dir = os.path.join(data_dir, 'graphs')
@@ -722,10 +634,8 @@ def test():
                 if len(mask.shape) > 2:
                     patch = mask[:, y0:y1, x0:x1]
                     logger1.info("patch.shape: " + patch.shape)
-            
-            #logger1.info(i, u , v, data)
-
-        
+                    
+    
 ###############################################################################
 def main():
     
@@ -743,28 +653,28 @@ def main():
     ##########
     # Variables
     t0 = time.time()
-    percentile = 85
-    dx, dy = 4, 4   # nearest neighbors patch size
-    min_z = 128     # min z value to consider a hit
-    N_plots = 20
-    figsize = (12, 12)
-    
-    # best colors
-    node_color, edge_color = '#cc9900', '#ffbf00'  # gold
-
-    default_node_size = 2 
-    plot_width_key, plot_width_mult = 'inferred_speed_mph', 0.085 # 0.08  # variable width
-    #width_key, width_mult = 4, 1   # constant width
-    if config.num_classes == 8:
-        use_totband = True
-    else:
-        use_totband = False
+    percentile = 85 # percentil filter (default = 85)
+    dx, dy = 6, 6   # nearest neighbors patch size  (default = (4, 4))
+    min_z = 128     # min z value to consider a hit (default = 128)
+    N_plots = 0
+    n_threads = 12
         
+    # set speed bands, assume a total channel is appended to the speed channels
+    if config.skeleton_band > 0:
+        max_speed_band = config.skeleton_band - 1
+    else:
+        max_speed_band = config.num_channels - 1
+        
+    #if config.num_classes == 8:
+    #    use_totband = True
+    #else:
+    #    use_totband = False   
     save_shapefiles = True
     use_weighted_mean = True
     variable_edge_speed = False
     run_08a_plot_graph_plus_im = False
     verbose = False
+    n_threads = 12
     ##########    
  
     # input dirs
@@ -791,8 +701,14 @@ def main():
             mask_dir = folds_dir
             mask_prefix = 'fold0_'
             
-    log_file = os.path.join(res_root_dir, 'skeleton_speed.log')
-    console, logger1 = make_logger.make_logger(log_file, logger_name='log')
+    #if os.path.exists(out_dir_mask_norm):
+    #    mask_dir = out_dir_mask_norm
+    #else:
+    #    mask_dir = merge_dir
+    log_file = os.path.join(res_root_dir, 'graph_speed.log')
+    console, logger1 = make_logger.make_logger(log_file, logger_name='log',
+                                               write_to_console=bool(config.log_to_console))
+    #console, logger1 = make_logger.make_logger(log_file, logger_name='log')
 
     # output dirs
     graph_speed_dir = os.path.join(res_root_dir, config.graph_dir + '_speed')
@@ -801,7 +717,6 @@ def main():
 
     # speed conversion dataframes (see _speed_data_prep.ipynb)
     speed_conversion_file = config.speed_conversion_file
-    # load conversion file
     # get the conversion diction between pixel mask values and road speed (mph)
     if config.num_classes > 1:
         conv_df, conv_dict \
@@ -816,11 +731,12 @@ def main():
                       min_z=min_z, 
                       dx=dx, dy=dy,
                       percentile=percentile,
-                      use_totband=use_totband, 
+                      max_speed_band=max_speed_band, 
                       use_weighted_mean=use_weighted_mean,
                       variable_edge_speed=variable_edge_speed,
                       mask_prefix=mask_prefix,
                       save_shapefiles=save_shapefiles,
+                      n_threads=n_threads,
                       verbose=verbose)
     
     t1 = time.time()
@@ -830,12 +746,43 @@ def main():
     if N_plots > 0:
         
         logger1.info("\nPlot a few...")
+
+        # plotting
+        figsize = (12, 12)
+        node_color, edge_color = 'OrangeRed', '#ff571a'
+        node_color, edge_color = '#00e699', '#1affb2'  # aquamarine
+        node_color, edge_color = 'turquoise', '#65e6d9'  # turqoise
+        node_color, edge_color = 'deepskyblue', '#33ccff'
+        node_color, edge_color = '#e68a00', '#ffa31a' # orange
+        node_color, edge_color = '#33ff99', 'SpringGreen'
+        node_color, edge_color = 'DarkViolet', 'BlueViolet' #'#b300ff'
+        node_color, edge_color = '#a446d2',  'BlueViolet'
+        #edge_color='#00a6ff',
+        #node_color = '#33cccc' #turquise
+        #edge_color = '#47d1d1'
+        #node_color, edge_color = '#ffd100', '#e09900', # orange gold
+        #node_color = '#29a329' # green
+        #edge_color = '#33cc33'
+        #node_color='#66ccff' # blue
+        #edge_color='#999999'
+        
+        # best colors
+        node_color, edge_color = '#cc9900', '#ffbf00'  # gold
+        #node_color, edge_color = 'l#4dff4d', '#00e600' # green
+    
+        default_node_size = 2 #0.15 #4
+        plot_width_key, plot_width_mult = 'inferred_speed_mph', 0.085 # 0.08  # variable width
+        #width_key, width_mult = 4, 1   # constant width
+
+
         # define output dir
         graph_speed_plots_dir = os.path.join(res_root_dir, config.graph_dir + '_speed_plots')
         os.makedirs(graph_speed_plots_dir, exist_ok=True)
 
         # plot graph on image (with width proportional to speed)
-        path_images = os.path.join(config.path_data_root, config.test_data_refined_dir)        
+        path_images = config.test_data_refined_dir  
+        # path_images = os.path.join(config.path_data_root, config.test_data_refined_dir)        
+
         image_list = [z for z in os.listdir(path_images) if z.endswith('tif')]
         if len(image_list) > N_plots:
             image_names = np.random.choice(image_list, N_plots)
@@ -844,7 +791,7 @@ def main():
         #logger1.info("image_names: " + image_names)
         
         for i,image_name in enumerate(image_names):
-            if i > 1000:
+            if i > 10:
                 break
             
             image_path = os.path.join(path_images, image_name)
@@ -858,7 +805,8 @@ def main():
             #if not os.path.exists(image_path)
         
             figname = os.path.join(graph_speed_plots_dir, image_name)
-            _ = plot_graph_on_im_yuge(G, image_path, figsize=figsize, 
+            figname = figname.replace('.tif', '.png')
+            _ = apls_plots.plot_graph_on_im_yuge(G, image_path, figsize=figsize, 
                              show_endnodes=True,
                              default_node_size=default_node_size,
                              width_key=plot_width_key, width_mult=plot_width_mult, 
@@ -866,13 +814,14 @@ def main():
                              title=image_name, figname=figname, 
                              verbose=True, super_verbose=verbose)
 
+
     t2 = time.time()
     logger1.info("Time to execute add_travel_time_dir(): {x} seconds".format(x=t1-t0))
     logger1.info("Time to make plots: {x} seconds".format(x=t2-t1))
     logger1.info("Total time: {x} seconds".format(x=t2-t0))
+    print("Total time: {x} seconds".format(x=t2-t0))
 
             
 ###############################################################################
 if __name__ == "__main__":
     main()
-

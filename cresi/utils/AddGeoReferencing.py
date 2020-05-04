@@ -14,7 +14,6 @@ import glob
 import sys
 from tqdm import tqdm
 
-
 def geo_that_raster(norm_folder, original_image_folder):
     os.chdir(norm_folder)
     SR_output=glob.glob("*.tif")

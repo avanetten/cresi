@@ -90,6 +90,7 @@ import json
 import math
 import fiona
 import shutil
+import shapely
 import numpy as np
 import geopandas as gpd
 import random
@@ -518,10 +519,102 @@ def update_geojson_dir_speed(geojson_dir_in, geojson_dir_out,
     return
 
 
+
 ###############################################################################
 def create_speed_gdf(image_path, geojson_path, mask_path_out_gray,
                      bin_conversion_func, mask_burn_val_key='burnValue',
                      buffer_distance_meters=2, buffer_roundness=1,
+                     dissolve_by='inferred_speed_mps',  # 'speed_m/s', 
+                     bin_conversion_key='speed_mph',
+                     crs=None,  # {'init': 'epsg:4326'},
+                     zero_frac_thresh=0.05,
+                     verbose=False):
+
+    '''Create buffer around geojson for speeds, use bin_conversion_func to
+    assign values to the mask'''
+
+    # get gdf_buffer
+    try:
+        inGDF = gpd.read_file(geojson_path)
+    except:
+        print("Can't read geojson:", geojson_path)
+        # create emty mask
+        h, w = skimage.io.imread(image_path).shape[:2]
+        #h, w = cv2.imread(image_path, 0).shape[:2]
+        mask_gray = np.zeros((h, w)).astype(np.uint8)
+        skimage.io.imsave(mask_path_out_gray, mask_gray)
+        # cv2.imwrite(mask_path_out, mask_gray)
+        return []
+
+    if len(inGDF) == 0:
+        print("Empty mask for path:", geojson_path)
+        # create emty mask
+        h, w = skimage.io.imread(image_path).shape[:2]  
+        # h, w = cv2.imread(image_path, 0).shape[:2]
+        mask_gray = np.zeros((h, w)).astype(np.uint8)
+        skimage.io.imsave(mask_path_out_gray, mask_gray)
+        # cv2.imwrite(mask_path_out, mask_gray)
+        return []
+        
+    # project
+    projGDF = osmnx_funcs.project_gdf(inGDF, to_crs=crs)
+    if verbose:
+        print("inGDF.columns:", inGDF.columns)
+
+    gdf_utm_buffer = projGDF.copy()
+    # perform Buffer to produce polygons from Line Segments
+    gdf_utm_buffer['geometry'] = gdf_utm_buffer.buffer(buffer_distance_meters,
+                                                       buffer_roundness)
+    gdf_utm_dissolve = gdf_utm_buffer.dissolve(by=dissolve_by)
+    gdf_utm_dissolve.crs = gdf_utm_buffer.crs
+    gdf_buffer = gdf_utm_dissolve.to_crs(inGDF.crs)
+    if verbose:
+        print("gdf_buffer['geometry'].values[0]:",
+              gdf_buffer['geometry'].values[0])
+
+    # set burn values
+    speed_arr = gdf_buffer[bin_conversion_key].values
+    burnVals = [bin_conversion_func(s) for s in speed_arr]
+    gdf_buffer[mask_burn_val_key] = burnVals
+
+    # create mask
+    gdf_to_array(gdf_buffer, image_path, mask_path_out_gray,
+                            mask_burn_val_key=mask_burn_val_key,
+                            verbose=verbose)
+
+    # check to ensure no mask outside the image pixels (some images are
+    # largely black)
+    im_bgr = skimage.io.imread(image_path)
+    # im_bgr = cv2.imread(image_path, 1)
+    try: 
+        im_gray = np.sum(im_bgr, axis=2)
+        # check if im_gray is more than X percent black
+        zero_frac = 1. - float(np.count_nonzero(im_gray)) / im_gray.size
+        if zero_frac >= zero_frac_thresh:
+            print("zero_frac:", zero_frac)
+            print("create_speed_gdf(): checking to ensure masks are null where "
+                  "image is null")
+            # ensure the label doesn't extend beyond the image
+            mask_gray = cv2.imread(mask_path_out_gray, 0)
+            zero_locs = np.where(im_gray == 0)
+            # set mask_gray to zero at location of zero_locs
+            mask_gray[zero_locs] = 0
+            # overwrite
+            cv2.imwrite(mask_path_out_gray, mask_gray)
+    except:
+        # something is wrong with the image...
+        pass 
+        # h0, w0 = 100, 100
+        # mask_gray = np.zeros((h0, w0)).astype(np.uint8)
+        # skimage.io.imsave(mask_path_out_gray, mask_gray)
+
+    return gdf_buffer
+
+
+###############################################################################
+def create_speed_gdf_v0(image_path, geojson_path, mask_path_out_gray,
+                     bin_conversion_func, mask_burn_val_key='burnValue',
+                     buffer_distance_meters=2, # buffer_roundness=1,
                      dissolve_by='inferred_speed_mps',  # 'speed_m/s', 
                      bin_conversion_key='speed_mph',
                      # crs={'init': 'epsg:4326'},
@@ -529,7 +622,9 @@ def create_speed_gdf(image_path, geojson_path, mask_path_out_gray,
                      verbose=False):
 
     '''Create buffer around geojson for speeds, use bin_conversion_func to
-    assign values to the mask'''
+    assign values to the mask
+    https://shapely.readthedocs.io/en/stable/manual.html#object.buffer
+    '''
 
     # get gdf_buffer
     try:
@@ -561,8 +656,8 @@ def create_speed_gdf(image_path, geojson_path, mask_path_out_gray,
 
     gdf_utm_buffer = projGDF.copy()
     # perform Buffer to produce polygons from Line Segments
-    gdf_utm_buffer['geometry'] = gdf_utm_buffer.buffer(buffer_distance_meters,
-                                                       buffer_roundness)
+    gdf_utm_buffer['geometry'] = gdf_utm_buffer.buffer(buffer_distance_meters)
+                                                     #  , buffer_roundness)
     gdf_utm_dissolve = gdf_utm_buffer.dissolve(by=dissolve_by)
     gdf_utm_dissolve.crs = gdf_utm_buffer.crs
     gdf_buffer = gdf_utm_dissolve.to_crs(inGDF.crs)
@@ -718,8 +813,8 @@ def gdf_to_array(gdf, im_file, output_raster, burnValue=150,
     return
 
 
-###############################################################################
-if __name__ == "__main__":
+##############################################################################
+def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--geojson_dir_in', default='', type=str,
@@ -737,45 +832,8 @@ if __name__ == "__main__":
                              suffix=args.suffix,
                              verbose=True)
 
-#    ## Example
-#    # Train
-#    geojson_dir_in = '/raid/cosmiq/spacenet/data/spacenetv2/AOI_2_Vegas_Train/400m/geojson/spacenetroads'
-#    geojson_dir_out = '/raid/cosmiq/spacenet/data/spacenetv2/AOI_2_Vegas_Train/400m/geojson/spacenetroads_noveau'
-#    # Test
-#    #geojson_dir_in = '/raid/cosmiq/spacenet/data/spacenetv2/AOI_2_Vegas_Test/400m/geojson/spacenetroads'
-#    #geojson_dir_out = '/raid/cosmiq/spacenet/data/spacenetv2/AOI_2_Vegas_Test/400m/geojson/spacenetroads_noveau'
-#    # old paths
-#    #geojson_dir_in = '/raid/cosmiq/spacenet/data/spacenetv2/spacenetLabels/AOI_2_Vegas/400m/'
-#    #geojson_dir_out = '/raid/cosmiq/spacenet/data/spacenetv2/spacenetLabels/AOI_2_Vegas/400m_noveau/'
-#    run_single = False
-#    run_dir = True
-#
-#    # single example 
-#    if run_single:
-#        json_file = 'spacenetroads_AOI_2_Vegas_img16.geojson'
-#        os.makedirs(geojson_dir_out, exist_ok=True)
-#        geojson_path_in = os.path.join(geojson_dir_in, json_file)
-#        geojson_path_out = os.path.join(geojson_dir_out, json_file)
-#    
-#        with open(geojson_path_in, 'r+') as f:
-#            json_data = json.load(f)
-#        json_data['features']
-#        
-#        source = fiona.open(geojson_path_in, 'r')
-#        for i,geojson_row in enumerate(source):
-#            print("\ngeojson_row:", geojson_row)
-#            speed_mph, speed_mps = speed_func(geojson_row)
-#            print ("  speed_mph, speed_mps:", speed_mph, speed_mps)
-#                
-#            # update properties?
-#            geojson_row['properties']['speed_mph'] = speed_mph
-#            geojson_row['properties']['speed_m/s'] = speed_mps 
-#            #source[i] = geojson_row
-#            
-#        # create new geojson
-#        add_speed_to_geojson(geojson_path_in, geojson_path_out)
-#               
-#    
-#    # full directory
-#    if run_dir:
-#        update_geojson_dir_speed(geojson_dir_in, geojson_dir_out, verbose=True)
+##############################################################################
+if __name__ == "__main__":
+    main()
+
+    

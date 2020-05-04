@@ -5,9 +5,13 @@ cv2.setNumThreads(0)
 cv2.ocl.setUseOpenCL(False)
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 # torch.backends.cudnn.benchmark = True
 import tqdm
+from multiprocessing.pool import Pool
+from torch import multiprocessing
+
 from torch.serialization import SourceChangeWarning
 import warnings
 import torchsummary
@@ -16,6 +20,13 @@ from torch.utils.data.dataloader import DataLoader as PytorchDataLoader
 # import relative paths
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from dataset.neural_dataset import SequentialDataset
+
+# global variables for cpu_func()
+MOD = 0
+FLIPS = 0
+BORDER = 0
+PREFIX = 0
+SAVE_DIR = 0
 
 
 class flip:
@@ -26,13 +37,21 @@ class flip:
 
 def flip_tensor_lr(batch):
     columns = batch.data.size()[-1]
-    index = torch.autograd.Variable(torch.LongTensor(list(reversed(range(columns)))).cuda())
+    if torch.cuda.is_available():
+        index = torch.autograd.Variable(torch.LongTensor(list(reversed(range(columns)))).cuda())
+    else:
+        index = torch.autograd.Variable(torch.LongTensor(list(reversed(range(columns)))))
+        
     return batch.index_select(3, index)
 
 
 def flip_tensor_ud(batch):
     rows = batch.data.size()[-2]
-    index = torch.autograd.Variable(torch.LongTensor(list(reversed(range(rows)))).cuda())
+    if torch.cuda.is_available():
+        index = torch.autograd.Variable(torch.LongTensor(list(reversed(range(rows)))).cuda())
+    else:
+        index = torch.autograd.Variable(torch.LongTensor(list(reversed(range(rows)))))
+
     return batch.index_select(2, index)
 
 
@@ -41,9 +60,16 @@ def to_numpy(batch):
 
 
 def predict(model, batch, flips=flip.FLIP_NONE, verbose=False):
+    
+    if verbose:
+        print("  eval.py - predict() - executing...")
+
     #print ("run eval.predict()...")
     # predict with tta on gpu
     pred1 = F.sigmoid(model(batch))
+    # with torch.no_grad():
+    #    pred1 = F.sigmoid(model(batch))
+
     if verbose:
         print("  eval.py - predict() - batch.shape:", batch.shape)
         print("  eval.py - predict() - pred1.shape:", pred1.shape)
@@ -62,21 +88,37 @@ def predict(model, batch, flips=flip.FLIP_NONE, verbose=False):
 
 
 #def read_model(config, fold):
-def read_model(path_model_weights, fold):
+def read_model(path_model_weights, fold, n_gpus=4):
     print ("Running eval.read_model()...")
     # model = nn.DataParallel(torch.load(os.path.join('..', 'weights', project, 'fold{}_best.pth'.format(fold))))
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', SourceChangeWarning)
         
-        model = torch.load(os.path.join(path_model_weights, 'fold{}_best.pth'.format(fold)))
-        #model = torch.load(os.path.join(config.path_model_weights, 'fold{}_best.pth'.format(fold)))
+        if torch.cuda.is_available():
+            print ("load model with cuda")
+            model = torch.load(os.path.join(path_model_weights, 'fold{}_best.pth'.format(fold))).cuda()
+            #model = torch.load(os.path.join(config.path_model_weights, 'fold{}_best.pth'.format(fold)))
+            # multple gpus
+            try:
+                model = nn.DataParallel(model, device_ids=[0,1,2,3], dim=0)
+                print("multi-gpu")
+            except:
+                pass
         
+        else:
+            print("load model with cpu")
+            # torch 0.3
+            model = torch.load(os.path.join(path_model_weights, 'fold{}_best.pth'.format(fold)),  map_location=lambda storage, loc: storage)
+            #model = torch.load(os.path.join(path_model_weights, 'fold{}_best.pth'.format(fold)),  map_location=lambda storage, location: 'cpu')
+            ## torch 0.4
+            #model = torch.load(os.path.join(path_model_weights, 'fold{}_best.pth'.format(fold)), map_location='cpu')
+    
         #model = torch.load(os.path.join(config.results_dir, 'weights', config.folder, 'fold{}_best.pth'.format(fold)))
         model.eval()
         print ("  model:", model)
         print ("  model sucessfully loaded")
         return model
-
+        
 
 class Evaluator:
     """
@@ -102,42 +144,69 @@ class Evaluator:
         self.weight_dir = weight_dir
         
         self.save_im_gdal_format = save_im_gdal_format
-        #self.save_im_skimage = save_im_skimage
-        
-        #str_tmp = self.config.out_suff + '/folds'
-        #self.save_dir = os.path.join(self.config.results_dir, self.folder + (str_tmp  if self.test else ''))
-        ##self.save_dir = os.path.join(self.config.results_dir, self.folder + ('_test' if self.test else ''))
 
         self.val_transforms = val_transforms
         os.makedirs(self.save_dir, exist_ok=True)
+        
+        
+    def predict(self, fold, val_indexes, weight_dir,
+                verbose=False):
+        global MOD
+        global FLIPS
+        global BORDER
+        global PREFIX
+        global SAVE_DIR
+        n_threads_cpu = 12
 
-    def predict(self, fold, val_indexes, weight_dir, verbose=False):
         print ("run eval.Evaluator.predict()...")
         prefix = ('fold' + str(fold) + "_") if (self.test and fold is not None) else ""
         print ("prefix:", prefix)
         print ("Creating datasets within pytorch_utils/eval.py()...")
-        val_dataset = SequentialDataset(self.ds, val_indexes, stage='test', config=self.config, transforms=self.val_transforms)
-        val_dl = PytorchDataLoader(val_dataset, batch_size=self.config.predict_batch_size, num_workers=self.num_workers, drop_last=False)
-        print ("len val_dl:", len(val_dl))
+        if not torch.cuda.is_available():
+            self.num_workers = n_threads_cpu
+
+        val_dataset = SequentialDataset(self.ds, val_indexes, 
+                                        stage='test', config=self.config, 
+                                        transforms=self.val_transforms)
+        val_dl = PytorchDataLoader(val_dataset, 
+                                   batch_size=self.config.predict_batch_size,
+                                   num_workers=self.num_workers, 
+                                   drop_last=False)
+        print("len val_dl:", len(val_dl))
+        print("self.num_workers", self.num_workers)
         #print ("weights_dir:", self.weights_dir)
         model = read_model(weight_dir, fold)
-        #model = read_model(self.config, fold)
-        #print ("glurp")
+        
+        # set global variables
+        FLIPS = self.flips
+        BORDER = self.border
+        SAVE_DIR = self.save_dir
+        PREFIX = prefix
+        MOD = model
+        
         pbar = tqdm.tqdm(val_dl, total=len(val_dl))
-        #print ("tqdm pbar:", pbar)
-        for data in pbar:
-            #print ("pbar data:", data)
-            print("data['image'].shape:", data['image'].shape)
-            samples = torch.autograd.Variable(data['image'], volatile=True).cuda()
-            predicted = predict(model, samples, flips=self.flips)
-            if verbose:
-                print("  eval.py -  - Evaluator - predict() - len samples:", len(samples))
-                print("  eval.py - Evaluator - predict()- samples.shape:", samples.shape)
-                print("  eval.py - Evaluator - predict() - predicted.shape:", predicted.shape)
-                # print("  eval.py - Evaluator - predict() - torchsummary.summary(model, (4, 3, 1344, 1344):", torchsummary.summary(model, samples.shape))
-
-            self.process_batch(predicted, model, data, prefix=prefix)
+        if torch.cuda.is_available():
+            for data in pbar:
+                samples = torch.autograd.Variable(data['image'], volatile=True).cuda()                    
+                predicted = predict(model, samples, flips=self.flips)
+                if verbose:
+                    print("  eval.py -  - Evaluator - predict() - len samples:", len(samples))
+                    print("  eval.py - Evaluator - predict()- samples.shape:", samples.shape)
+                    print("  eval.py - Evaluator - predict() - predicted.shape:", predicted.shape)
+                    print("  eval.py - Evaluator - predict() - data['image'].shape:", data['image'].shape)
+                self.process_batch(predicted, model, data, prefix=prefix)
+        else:
+            for data in pbar:
+                samples = torch.autograd.Variable(data['image'], volatile=True)
+                predicted = predict(model, samples, flips=self.flips)
+                if verbose:
+                    print("  eval.py -  - Evaluator - predict() - len samples:", len(samples))
+                    print("  eval.py - Evaluator - predict()- samples.shape:", samples.shape)
+                    print("  eval.py - Evaluator - predict() - predicted.shape:", predicted.shape)
+                    print("  eval.py - Evaluator - predict() - data['image'].shape:", data['image'].shape)
+                self.process_batch(predicted, model, data, prefix=prefix)
         self.post_predict_action(prefix=prefix)
+
 
     def cut_border(self, image):
         if image is None:
