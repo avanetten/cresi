@@ -139,10 +139,13 @@ RUN apt install -y libgl1-mesa-glx
 # add a jupyter kernel for the conda environment in case it's wanted
 RUN source activate cresi && python -m ipykernel.kernelspec
 
+# # clone cresi
+RUN git clone https://github.com/avanetten/cresi.git /opt/cresi/
+
 # TensorBoard
 EXPOSE 6006
 # IPython
 EXPOSE 9111
 
-WORKDIR "/"
+WORKDIR "/opt/cresi"
 RUN ["/bin/bash"]

@@ -1,4 +1,4 @@
-# nvidia-docker build -t cresi_v3_image .
+# docker build -t cresi_v3_image_cpu .
 # nvidia-docker run -it --ipc=host -v /local_data:/local_data/ -p 9111:9111 --name cresi_v3 cresi_v3_image
 # To use jupyter notebook, inside container run:
 # jupyter notebook --ip 0.0.0.0 --no-browser --allow-root --port=9111
@@ -128,10 +128,13 @@ RUN apt install -y libgl1-mesa-glx
 # add a jupyter kernel for the conda environment in case it's wanted
 RUN source activate cresi && python -m ipykernel.kernelspec
 
+# # clone cresi
+RUN git clone https://github.com/avanetten/cresi.git /opt/cresi/
+
 # TensorBoard
 EXPOSE 6006
 # IPython
 EXPOSE 9111
 
-WORKDIR "/"
+WORKDIR "/opt/cresi"
 RUN ["/bin/bash"]
