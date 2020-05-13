@@ -4,7 +4,8 @@
 # jupyter notebook --ip 0.0.0.0 --no-browser --allow-root --port=9111
 # back on local machine, invoke the following in a web browser: https://localhost:9111
 
-FROM nvidia/cuda:10.0-cudnn7-devel
+FROM nvidia/cuda:9.2-devel-ubuntu16.04
+# FROM nvidia/cuda:10.0-cudnn7-devel
 MAINTAINER avanetten
 
 ENV CUDNN_VERSION 7.3.0.29
@@ -62,7 +63,7 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-4.5.4-Linux-x86_
 ENV TINI_VERSION v0.16.1
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/bin/tini
 RUN chmod +x /usr/bin/tini
-RUN ipython3 kernel install
+# RUN ipython3 kernel install
 
 # use conda-forge instead of default channel
 RUN conda update conda && \
@@ -81,7 +82,8 @@ RUN pip install torch-0.3.0.post4-cp36-cp36m-linux_x86_64.whl \
  	&& pip install tensorboardX \
 	&& pip install torchsummary \
 	&& pip install utm \
-	&& pip install numba=0.45
+	&& pip install numba \
+	&& pip install imagecodecs
 			  
 RUN conda install -n cresi \
 			  gdal=2.4.2 \

@@ -76,7 +76,8 @@ RUN pip install http://download.pytorch.org/whl/cpu/torch-0.3.0.post4-cp36-cp36m
 && pip install tensorboardX \
 && pip install utm \
 && pip install numba \
-&& pip install torchsummary
+&& pip install torchsummary \
+&& pip install imagecodecs
 			  
 RUN conda install -n cresi \
 			  gdal=2.4.2 \
