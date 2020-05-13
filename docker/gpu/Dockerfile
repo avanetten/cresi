@@ -22,29 +22,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # install requirements
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    apt-utils \
-    bc \
-    bzip2 \
-    ca-certificates \
-    curl \
-    git \
-    libgdal-dev \
-    libssl-dev \
-    libffi-dev \
-    libncurses-dev \
-    libgl1 \
-    jq \
-    nfs-common \
-    parallel \
-    python-dev \
-    python-pip \
-    python-wheel \
-    python-setuptools \
-    unzip \
-    vim \
+	apt-utils \
+	bc \
+	bzip2 \
+	ca-certificates \
+	curl \
+	git \
+	libgdal-dev \
+	libssl-dev \
+	libffi-dev \
+	libncurses-dev \
+	libgl1 \
+	jq \
+	nfs-common \
+	parallel \
+	python-dev \
+	python-pip \
+	python-wheel \
+	python-setuptools \
+	unzip \
+	vim \
 	tmux \
-    wget \
-    build-essential \
+	wget \
+	build-essential \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -86,43 +86,43 @@ RUN pip install torch-0.3.0.post4-cp36-cp36m-linux_x86_64.whl \
 	&& pip install imagecodecs
 			  
 RUN conda install -n cresi \
-			  gdal=2.4.2 \
-		   	  geopandas=0.6.3 \
-			  fiona \
-			  rasterio \
-              osmnx=0.12 \
-			  networkx=2.2 \ 
-     	      awscli \
-              affine \
-              pyproj \
-              pyhamcrest \
-              cython \
-              fiona \
-              h5py \
-              ncurses \
-              jupyter \
-              jupyterlab \
-              ipykernel \
-              libgdal \
-              matplotlib \
-	          ncurses \
-              numpy \
-			  statsmodels \
-              pandas \
-              pillow \
-              pip \
-              scipy \
-              scikit-image \
-              scikit-learn \
-              shapely \
-              rtree \
-              testpath \
-              tqdm \
-              pandas \
-			  opencv \
-              jupyter \
-              jupyterlab \
-              ipykernel \
+		gdal=2.4.2 \
+		geopandas=0.6.3 \
+		fiona \
+		rasterio \
+		osmnx=0.12 \
+		networkx=2.2 \ 
+		awscli \
+		affine \
+		pyproj \
+		pyhamcrest \
+		cython \
+		fiona \
+		h5py \
+		ncurses \
+		jupyter \
+		jupyterlab \
+		ipykernel \
+		libgdal \
+		matplotlib \
+		ncurses \
+		numpy \
+		statsmodels \
+		pandas \
+		pillow \
+		pip \
+		scipy \
+		scikit-image \
+		scikit-learn \
+		shapely \
+		rtree \
+		testpath \
+		tqdm \
+		pandas \
+		opencv \
+		jupyter \
+		jupyterlab \
+		ipykernel \
 	&& conda clean -p \
 	&& conda clean -t \
 	&& conda clean --yes --all
