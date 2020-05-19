@@ -1,6 +1,6 @@
 ![Alt text](/results/images/header.png?raw=true "Header")
 
-# CRESI #
+![Alt text](/results/images/cresi_logo.png?raw=true "Header")
 
 ## City-scale Road Extraction from Satellite Imagery ##
 
