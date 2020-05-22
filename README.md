@@ -4,6 +4,8 @@
 <img src="/results/images/cresi_logo.png" width="350" alt="CRESI">
 </p>
 
+<h2 align="center">City-scale Road Extraction from Satellite Imagery</h2>
+
 ## City-scale Road Extraction from Satellite Imagery ##
 
 This repository provides an end-to-end pipeline to train models to detect  routable road networks over entire cities, and also provide speed limits and travel time estimates for each roadway.  We have observed success with both [SpaceNet](https://spacenet.ai) imagery and labels, as well as Google satellite imagery with [OSM](https://openstreetmap.org) labels. The repository consists of pre-processing modules, deep learning segmentation model (inspired by the winning SpaceNet 3 submission by [albu](https://github.com/SpaceNetChallenge/RoadDetector/tree/master/albu-solution)), post-proccessing modules to extract the road networks, inferred speed limits, and travel times.  Furthermore, we include modules to scale up network detection to the city-scale, rather than just looking at small image chips.  The output of CRESI is a geo-referenced [NetworkX](https://networkx.github.io) graph, with full access to the many graph-theoretic algorithms included in this package.  
