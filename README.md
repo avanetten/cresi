@@ -1,5 +1,7 @@
 ![Alt text](/results/images/header.png?raw=true "Header")
-<img src="/results/images/cresi_logo.png" alt="drawing" width="300"/>
+![Alt text](/results/images/header.png =300x)
+
+//<img src="/results/images/cresi_logo.png" alt="drawing" width="300"/>
 
 
 ## City-scale Road Extraction from Satellite Imagery ##
