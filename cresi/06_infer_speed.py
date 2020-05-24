@@ -453,21 +453,6 @@ def infer_travel_time(params):
         logger1.info("Saving shapefile to directory: {}".format(graph_dir_out))
         ox.save_graph_shapefile(G_out, filename=im_root, folder=graph_dir_out,
                                 encoding='utf-8')
-        
-        # save just terminal points too?
-        fout = graph_dir_out +'_terminal'
-        deg = dict(G_out.degree())
-        non_terminal_nodes = [i for i, d in deg.items() if d != 1]
-        G_out.remove_nodes_from(non_terminal_nodes)
-        # print("G_out.nodes():", G_out.nodes())
-        # osmnx is stupid and fails, so add one edge
-        u, v = list(G_out.nodes())[0], list(G_out.nodes())[1]
-        G_out.add_edge(u, v)
-        # print("len G.edges():", len(G_out.edges()))
-
-        ox.save_graph_shapefile(G_out, filename=im_root, 
-                                folder=fout,
-                                encoding='utf-8')
 
     return G_
 
