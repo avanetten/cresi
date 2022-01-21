@@ -6,7 +6,7 @@ Created on Mon Feb  4 14:51:46 2019
 @author: Jake Shermeyer
 """
 
-import gdal
+from osgeo import gdal
 
 def CreateMultiBandGeoTiff(OutPath, Array, nodatavalue=0):
     '''

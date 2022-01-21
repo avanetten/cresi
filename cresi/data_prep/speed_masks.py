@@ -8,7 +8,7 @@ Created on Tue Aug 27 09:03:15 2019
 
 import os
 import cv2
-import gdal
+from osgeo import gdal
 import math
 import road_speed
 import argparse

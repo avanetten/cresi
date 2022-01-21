@@ -8,7 +8,7 @@ Created on Sun Aug 26 10:05:24 2018
 """
 
 import numpy as np
-import gdal
+from osgeo import gdal
 import os
 import glob
 import sys

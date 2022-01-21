@@ -10,7 +10,7 @@ import os
 import sys
 import cv2
 import subprocess
-import gdal
+from osgeo import gdal
 import numpy as np
 import argparse
 from multiprocessing.pool import Pool
