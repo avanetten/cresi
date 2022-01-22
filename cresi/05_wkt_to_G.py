@@ -916,8 +916,9 @@ def wkt_to_G(params):
         G_projected = ox.project_graph(G1)
     
         # get geom wkt (for printing/viewing purposes)
-        for i,(u,v,attr_dict) in enumerate(G_projected.edges(data=True)):
-            attr_dict['geometry_wkt'] = attr_dict['geometry'].wkt
+        if 'geometry' in attr_dict.keys():
+            for i,(u,v,attr_dict) in enumerate(G_projected.edges(data=True)):
+                attr_dict['geometry_wkt'] = attr_dict['geometry'].wkt
 
         if verbose:
             print("post projection...")
