@@ -7,3 +7,4 @@ time python 04_skeletonize.py $JSON
 time python 05_wkt_to_G.py $JSON
 time python 06_infer_speed.py $JSON
 time python 07_create_submission.py $JSON
+time python 08_plot_graph_plus_im.py $JSON
