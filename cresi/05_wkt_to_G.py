@@ -1140,6 +1140,14 @@ def wkt_to_G(params):
     #print ("Saving graph to directory:", graph_dir)
     nx.write_gpickle(Gout, out_file, protocol=pickle_protocol)
     
+    # save epsg:3857 graph
+    if verbose:
+        logger1.info("Saving epgs:3857 graph to directory: {}".format(graph_dir))
+    G_epsg3857 = ox.project_graph(Gout, to_crs='epsg:3857')
+    p1_tmp, p2_tmp = out_file.split('.')
+    out_file_tmp = p1_tmp + '_3857.' + p2_tmp
+    nx.write_gpickle(G_epsg3857, out_file_tmp, protocol=pickle_protocol)    
+        
     # # save shapefile as well?
     # if save_shapefiles:
     #     logger1.info("Saving shapefile to directory: {}".format(graph_dir))
