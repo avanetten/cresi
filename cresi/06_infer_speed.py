@@ -444,6 +444,14 @@ def infer_travel_time(params):
     #logger1.info("Saving graph to directory: " + graph_dir)
     #out_file = os.path.join(graph_dir_out, image_name.split('.')[0] + '.gpickle')
     nx.write_gpickle(G, out_file, protocol=pickle_protocol)
+    
+    # save epsg:3857 graph
+    if verbose:
+        logger1.info("Saving epgs:3857 graph to directory: {}".format(graph_dir))
+    G_epsg3857 = ox.project_graph(G, to_crs='epsg:3857')
+    p1_tmp, p2_tmp = out_file.split('.')
+    out_file_tmp = p1_tmp + '_3857.' + p2_tmp
+    nx.write_gpickle(G_epsg3857, out_file_tmp, protocol=pickle_protocol)    
 
     # save shapefile as well?
     if save_shapefiles:
@@ -638,7 +646,7 @@ def main():
     ##########
     # Variables
     t0 = time.time()
-    percentile = 85 # percentil filter (default = 85)
+    percentile = 85 # percentile filter (default = 85)
     dx, dy = 6, 6   # nearest neighbors patch size  (default = (4, 4))
     min_z = 128     # min z value to consider a hit (default = 128)
     N_plots = 0
@@ -758,7 +766,6 @@ def main():
         default_node_size = 2 #0.15 #4
         plot_width_key, plot_width_mult = 'inferred_speed_mph', 0.085 # 0.08  # variable width
         #width_key, width_mult = 4, 1   # constant width
-
 
         # define output dir
         graph_speed_plots_dir = os.path.join(res_root_dir, config.graph_dir + '_speed_plots')
