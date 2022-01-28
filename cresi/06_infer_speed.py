@@ -448,7 +448,7 @@ def infer_travel_time(params):
     # save epsg:3857 graph
     if verbose:
         logger1.info("Saving epgs:3857 graph to directory: {}".format(graph_dir))
-    G_epsg3857 = ox.project_graph(G, to_crs='epsg:3857')
+    G_epsg3857 = ox.project_graph(G, to_crs='epsg:3857').to_undirected()
     p1_tmp, p2_tmp = out_file.split('.')
     out_file_tmp = p1_tmp + '_3857.' + p2_tmp
     nx.write_gpickle(G_epsg3857, out_file_tmp, protocol=pickle_protocol)    
