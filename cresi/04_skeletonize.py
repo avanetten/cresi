@@ -9,8 +9,9 @@ Inspired by:
     https://github.com/SpaceNetChallenge/RoadDetector/blob/master/albu-solution/src/skeleton.py
 """
 
-from skimage.morphology import skeletonize, remove_small_objects, remove_small_holes, medial_axis
+from skimage.morphology import skeletonize, remove_small_objects, remove_small_holes
 from skimage.morphology import erosion, dilation, opening, closing, disk
+from skimage.feature import blob_dog, blob_log, blob_doh
 import numpy as np
 from scipy import ndimage as ndi
 from matplotlib.pylab import plt
@@ -33,13 +34,46 @@ import scipy.spatial
 import skimage.io 
 import cv2
 
-from utils import make_logger
+from utils import make_logger, medial_axis_weight
 from configs.config import Config
 wkt_to_G = __import__('05_wkt_to_G')
 
 logger1 = None
 linestring = "LINESTRING {}"
 
+
+###############################################################################
+def neighbors1(x, y, max_x, max_y):
+    '''Neighors in 2-d array'''
+    return [(x2, y2) for x2 in range(x-1, x+2)
+                               for y2 in range(y-1, y+2)
+                               if (-1 < x <= max_x and
+                                   -1 < y <= max_y and
+                                   (x != x2 or y != y2) and
+                                   (0 <= x2 <= max_x) and
+                                   (0 <= y2 <= max_y))]
+
+
+###############################################################################
+def neighbors(x, y, max_x, max_y, dl=1):
+    '''Neighors in 2-d array of distance dl from point'''
+    return [(x2, y2) for x2 in range(x-dl, x+dl+1)
+                               for y2 in range(y-dl, y+dl+1)
+                               if (-1 < x <= max_x and
+                                   -1 < y <= max_y and
+                                   (x != x2 or y != y2) and
+                                   (0 <= x2 <= max_x) and
+                                   (0 <= y2 <= max_y))]
+
+
+###############################################################################
+def is_neighbor(p1, p2):
+    '''Determine if two points (2-d np arrays) are neighbors'''
+    diff = p1 - p2
+    if (np.abs(diff[0]) <= 1) and (np.abs(diff[1]) <= 1):
+        return True
+    else:
+        return False
 
 
 # from apls.py
@@ -231,6 +265,8 @@ def dl_post_process_pred(mask, glob_thresh=80, kernel_size=9,
         print("Time to smooth contours:", t3-t2, "seconds")
     
     # skeletonize
+    #medial = medial_axis(final_mask)
+    #medial_int = medial.astype(np.uint8)
     medial_int = medial_axis(final_mask).astype(np.uint8)
     if verbose:
         print("Time to compute medial_axis:", time.time() - t3, "seconds")
@@ -576,6 +612,937 @@ def add_small_segments(G, terminal_points, terminal_lines,
     return wkt, good_pairs, good_coords
 
 
+
+###############################################################################
+def terminal_points_to_crossroads(G, terminal_points, seen_coords=[],
+                                  dist1=100, angle1=30,
+                                  verbose=False, super_verbose=False):
+    '''
+    Connect small, missing segments
+    terminal points are the end of edges.  This function tries to pair small
+    gaps in roads.  For each terminal point, search for nearby points in
+    the road linestrings.  Ensure the nearby point is not the terminal point's
+    neighbor and is an acceptable angular cone.  Track added edges so we don't
+    good_pairs are already seen/matched pairs.  seen_coords are coordinates
+    we've already added (in add_small_segments()) that don't show up in the 
+    graph yet.
+    
+    Issues:
+    Since it looks at nodes, if the line is curved the angles can get screwed
+    up, which leads to erroneous connections.
+    Also, will only connect to existing nodes, not connect to an edge
+    midpoint.
+    '''
+    
+    print("Running terminal_points_to_crossroads()...")
+    
+    seen_coords = set(seen_coords)
+    print("N seen_coords:", len(seen_coords))
+    print("seen_coords:", seen_coords)
+    
+    try:
+        node = G.node
+    except:
+        node = G.nodes
+    # if verbose:
+     #    print("node:", node)
+    
+    # get all points in edges 
+    # THIS GIVES EVERY SINGLE PIXEL IN EDGES!
+    # This inserts edges into the middle of other edges, which causes problems
+    #   when edges are collapsed later on...
+    all_coords = []
+    for i,(u, v, data) in enumerate(G.edges(data=True)):
+        all_coords.extend(data['pts'])
+    # all_pts = np.array(all_pts)
+    all_coords = np.unique(np.array(all_coords), axis=1).astype(np.int32)
+
+    # get all points for nodes 
+    # this approach will only conect to existing nodes in the graph
+    all_nodes = list(G.nodes())
+    node_pos = [node[t]['o'].astype(np.int32) for t in all_nodes]
+    node_coords = np.array(node_pos)
+    
+    if verbose:
+        print("len all_coords:", len(all_coords))
+        print("all_coords[:5]", all_coords[:5])
+
+    # get terminal_points
+    deg = dict(G.degree())
+    terminal_points = [i for i, d in deg.items() if d == 1]
+    term_pos = [node[t]['o'].astype(np.int32) for t in terminal_points]
+    # term_set = set(terminal_points)
+    
+    # all_nodes = list(G.nodes())
+    # node_pos = [node[t]['o'].astype(np.int32) for t in all_nodes]
+    # node_pos_set = set([tuple(z) for z in node_pos])
+    
+    if verbose:
+        # print("all points:", all_points)
+        # print("node_pos[:5]:", node_pos[:5])
+        # print("nod_pos_set:", node_pos_set)
+        print("N terminal_points:", len(terminal_points))
+        print("term_pos[:5]:", term_pos[:5])
+    
+    # make kdtrees
+    kdtree_nodes = scipy.spatial.KDTree(node_coords)
+    #kdtree_all = scipy.spatial.KDTree(all_coords)
+    
+    # if super_verbose:
+    #     print("kdtree_all.data:", kdtree_all.data)
+    
+    # iterate through terminal points
+    good_pairs = []
+    # seen_pairs = set([])
+    n_neighbors = 8 #  2*dist1
+    if verbose:
+        print("Iterating through terminal points...")
+    for i, (t, tpos) in enumerate(zip(terminal_points, term_pos)):   
+        tpos_tup = tuple(tpos)
+        
+        # get neigbors of t
+        # if the edge is curved ,the direction of the neighbor will be all
+        # screwy! 
+        t_neighbors = list(G.neighbors(t))
+        if len(t_neighbors) > 1:
+            print("node ", t, "should be terminal, returning")
+            return
+        t_neigh = t_neighbors[0]
+        # # neighbor, (this is problematic, as above)
+        # t_neigh_pos = node[t_neigh]['o'].astype(np.int32)
+        # t_neigh_pos_tup = tuple(t_neigh_pos)
+        
+        # get edge instead of neighbor
+        # pick a point a few pixels from the end to mitigate any last-minute
+        #  curve
+        pix_from_end = 12
+        edge_t = list(G.edges(t))[0]
+        # edge props
+        edge_t_points = G.edges[edge_t[0], edge_t[1], 0]['pts']
+        pix_from_end = min(pix_from_end, len(edge_t_points))
+                    
+        # now check if first or last item in edge pts list is node t
+        e_pos_start = edge_t_points[0]
+        e_pos_end  = edge_t_points[-1]
+
+        if super_verbose:
+            print(i, "/", len(term_pos), ":", t, "tpos:", tpos)
+            print("  neighbor:", t_neigh)
+            print("  edge_t:", edge_t)
+            print("  edge_t_props[:5]:", edge_t_points[:5])
+            print("  edge_t_props[-5:]:", edge_t_points[-5:])
+            print("  type edge_t_points:", type(edge_t_points))
+            print("  e_pos_start, e_pos_end", e_pos_start, e_pos_end)
+            
+        # if node t is the end, reverse the order of the edge points
+        d_epos_start = np.linalg.norm(tpos - e_pos_start)
+        d_epos_end = np.linalg.norm(tpos - e_pos_end)
+        if d_epos_end < d_epos_start:
+            edge_t_points = edge_t_points[::-1]
+        try:
+            t_neigh_pos = edge_t_points[pix_from_end]
+        except:
+            if verbose:
+                print("someting weird wih edge:", t, "pos:", tpos, "skipping")
+            continue
+        t_neigh_pos_tup = tuple(t_neigh_pos)
+
+        # # apparently not all points in edges are adjacent, so this fails
+        # if is_neighbor(tpos, e_pos_start):  # e_pos_start == tpos_tup:
+        #     t_neigh_pos = edge_t_points[pix_from_end]
+        # elif is_neighbor(tpos, e_pos_end):  # e_pos_end == tpos_tup:
+        #     t_neigh_pos = edge_t_points[::-1][pix_from_end]
+        # else:
+        #     print("edge props don't align with t, returning")
+        #     return
+        # t_neigh_pos_tup = tuple(t_neigh_pos)
+
+        if super_verbose:
+            # print(i, "/", len(term_pos), ":", t, "tpos:", tpos)
+            # print("  neighbor:", t_neigh)
+            # print("  edge_t:", edge_t)
+            # print("  edge_t_props[:5]:", edge_t_points[:5])
+            # print("  edge_t_props[-5:]:", edge_t_points[-5:])
+            # print("  type edge_t_props:", type(edge_t_points))
+            # print("  e_pos_start, e_pos_end", e_pos_start, e_pos_end)
+            print("  neighbor pos:", t_neigh_pos)
+            
+        # ball query doesn't sort...
+        # idxs = kdtree_nodes.query_ball_point(tpos, r=dist1)
+        # positions = kdtree_all.data[idxs]
+        # dists = idxs
+            
+        # # get nearest points, sorted by closest        
+        dists, idxs = kdtree_nodes.query(tpos, k=n_neighbors,
+                                    distance_upper_bound=dist1)
+        # filter out bad distances
+        idxs = idxs[(dists > 0) & (dists < dist1)]
+        dists = dists[(dists > 0) & (dists < dist1)]
+        positions = kdtree_nodes.data[idxs]
+        # nodes_kd = [all_points[itmp] for itmp in idxs]
+            
+        if len(idxs) == 0:
+            continue
+        
+        if super_verbose:
+            # print("  idxs_raw, dists:", idxs, dists)
+            # print("  idxs_raw, nodes_kd, dists:", idxs, nodes_kd, dists)
+            # print("  idxs, positions, dists:", idxs, positions, dists)
+            print("  positions[0], positions[-1]:", positions[0], positions[-1])
+            
+        # iterate through nearest points
+        for dist_tmp, pos_tmp in zip(dists, positions):
+            #if super_verbose:
+            #    print("    pos_tmp", pos_tmp)
+            
+           # skip if pos_tmp is self
+            if tuple(pos_tmp)  == tpos_tup:
+                if super_verbose:
+                    "    self", pos_tmp, "skipping"
+                continue
+            
+             # skip if pos_tmp is neighbor (that connection already exists)
+            if tuple(pos_tmp)  == t_neigh_pos_tup:
+                if super_verbose:
+                    "     neighor", t_neigh_pos_tup, "skipping"
+                continue
+            
+            # check if the pair already exists
+            if ((tpos_tup, tuple(pos_tmp)) in seen_coords) or \
+                ((tuple(pos_tmp), tpos_tup) in seen_coords):
+                if super_verbose:
+                    print("    already seen edge:, skipping:")
+                continue
+                
+            # check angle between t and neighbor, and direction of pos_tmp
+            angle = get_angle(t_neigh_pos - tpos, np.array((0, 0)), tpos - pos_tmp)
+            # angle = get_angle(l1[1] - l1[0], np.array((0, 0)), l1[1] - e_pos)
+            #if super_verbose:
+            #    print("   angle:", angle)            
+            # if (-1*angle1 < angle < angle1) or (angle < -1*angle2) or (angle > angle2):
+            if (-1*angle1 < angle < angle1):
+                out_tup = (tpos_tup, tuple(pos_tmp))
+                good_pairs.append(out_tup)
+                seen_coords.add( out_tup ) 
+                if super_verbose:
+                    print("   angle:", angle)            
+                    print("   added coord:", out_tup)
+                break
+            
+        # # iterate through sorted near nodes and make a connection if 
+        # #   none exists
+        # for n in nodes_kd:
+        #      # check if edge exists
+        #     # if G.has_edge(t, n) or G.has_edge(n, t) or ((t,n) in good_pairs):
+        #     if G.has_edge(t, n) or G.has_edge(n, t) \
+        #             or ((t,n) in good_pairs) or ((n,t) in good_pairs):
+        #         continue
+        #     # if no edge exists, add to good_pairs and break from loop
+        #     else:
+        #         good_pairs.add((t, n))
+        #         # good_pairs.append((t, n))
+        #         seen_pairs.add((t,n))
+        #         seen_pairs.add((n,t))
+        #         #break
+                
+    if verbose: 
+        print("  good_pairs:", good_pairs)
+    
+    wkt = []
+    for s, e in good_pairs:
+        s_d, e_d = np.array(s), np.array(e)
+        dist = np.linalg.norm(s_d - e_d)
+        line_strings = ["{1:.1f} {0:.1f}".format(*c.tolist()) for c in [s_d, e_d]]
+        line = '(' + ", ".join(line_strings) + ')'
+        wkt.append(linestring.format(line))
+        if super_verbose:
+            print("    s_d, e_d", s_d, e_d)
+            print("    type s_d", type(s_d))
+            # print("    s_d - e_d", s_d - e_d)
+            # print("    dist:", dist)
+            print("    linestring:", line_strings)
+
+    # dists = {}
+    # for s, e in good_pairs:
+    #     s_d, e_d = s, e
+    #     # s_d, e_d = [G.nodes[s]['o'], G.nodes[e]['o']]
+    #     print("s_d", s_d)
+    #     print("type s_d", type(s_d))
+    #     print("s_d - e_d", s_d - e_d)
+    #     dists[(s, e)] = np.linalg.norm(s_d - e_d)
+
+    # dists = OrderedDict(sorted(dists.items(), key=lambda x: x[1]))
+
+    # wkt = []
+    # added = set()
+    # for s, e in dists.keys():
+    #     s_d, e_d = G.nodes[s]['o'].astype(np.int32), G.nodes[e]['o'].astype(np.int32)
+    #     line_strings = ["{1:.1f} {0:.1f}".format(*c.tolist()) for c in [s_d, e_d]]
+    #     line = '(' + ", ".join(line_strings) + ')'
+    #     wkt.append(linestring.format(line))
+    #     # if s not in added and e not in added:
+    #     #     added.add(s)
+    #     #     added.add(e)
+    #     #     s_d, e_d = G.nodes[s]['o'], G.nodes[e]['o']
+    #     #     line_strings = ["{1:.1f} {0:.1f}".format(*c.tolist()) for c in [s_d, e_d]]
+    #     #     line = '(' + ", ".join(line_strings) + ')'
+    #     #     wkt.append(linestring.format(line))
+        
+    return wkt, good_pairs
+
+
+
+###############################################################################
+def terminal_points_to_crossroads_midline(wkt_list,
+                                  dist1=100, angle1=35,
+                                  verbose=False, super_verbose=False):
+    '''
+    Connect small, missing segments
+    terminal points are the end of edges.  This function tries to pair small
+    gaps in roads.  For each terminal point, search for nearby points in
+    the road linestrings.  Ensure the nearby point is not the terminal point's
+    neighbor ad is an acceptable angular cone.  Track added edges so we don't
+    good_pairs are already seen/matched pairs.  seen_coords are coordinates
+    we've already added (in add_small_segments()) that don't show up in the 
+    graph yet.
+    
+    ideally, for this function, we'd like every direction change to be a
+    node. Ineligant, but wkt_to_G does this, so let's take wkt as input, and 
+    then just create a graph from this
+    
+    DOESN'T WORK PROPERLY, AND NEW EDGES ARE STILL GOING TO GET SCREWED UP
+    BY 05_WKT_TO_G BECAUSE THEY MAY BE IN THE MIDDLE OF AN EDGE'
+    '''
+    
+    print("Running terminal_points_to_crossroads()...")
+    t0 = time.time()
+    
+    node_loc_dic, edge_dic = wkt_to_G.wkt_list_to_nodes_edges(wkt_list, 
+                                                     node_iter=1,
+                                                     edge_iter=1)
+    t1 = time.time()
+    print ("Time to run wkt_list_to_nodes_egdes():", t1 - t0, "seconds")
+    #print ("node_loc_dic:", node_loc_dic)
+    #print ("edge_dic:", edge_dic)
+    print ("Creating G...")
+    G = wkt_to_G.nodes_edges_to_G(node_loc_dic, edge_dic)  
+    # This graph will have a unique edge for each line segment, meaning that
+    #  many nodes will have degree 2 and be in the middle of a long edge.
+    if verbose:
+        node = list(G.nodes())[-1]
+        print(node, "random node props:", G.nodes[node])
+        # print an edge
+        edge_tmp = list(G.edges())[-1]
+        print(edge_tmp, "random edge props:", G.get_edge_data(edge_tmp[0], edge_tmp[1]))
+
+    try:
+        node = G.node
+    except:
+        node = G.nodes
+    # if verbose:
+     #    print("node:", node)
+    
+    # get all points for nodes 
+    # this approach will only conect to existing nodes in the graph
+    all_nodes = list(G.nodes())
+    node_pos = [[node[t]['x_pix'], node[t]['y_pix']] for t in all_nodes]
+    #node_pos = [node[t]['o'].astype(np.int32) for t in all_nodes]
+    node_coords = np.array(node_pos).astype(np.int32)
+    # node_pos_set = set([tuple(z) for z in node_pos])
+    
+    if verbose:
+        print("len node_coords:", len(all_nodes))
+        print("node_coords[:5]",node_coords[:5])
+
+    # get terminal_points
+    deg = dict(G.degree())
+    terminal_points = [i for i, d in deg.items() if d == 1]
+    term_pos = [np.array([node[t]['x_pix'], node[t]['y_pix']]) for t in terminal_points]
+    # term_pos = [node[t]['o'].astype(np.int32) for t in terminal_points]
+    # term_set = set(terminal_points)
+        
+    if verbose:
+        # print("all points:", all_points)
+        # print("node_pos[:5]:", node_pos[:5])
+        # print("nod_pos_set:", node_pos_set)
+        print("N terminal_points:", len(terminal_points))
+        print("term_pos[:5]:", term_pos[:5])
+    
+    # make kdtrees
+    kdtree_nodes = scipy.spatial.KDTree(node_coords)    
+    # if super_verbose:
+    #     print("kdtree_nodes.data:", kdtree_nodes.data)
+    
+    # iterate through terminal points
+    good_pairs = []
+    seen_coords = set([])
+    n_neighbors = 8
+    if verbose:
+        print("Iterating through terminal points...")
+    for i, (t, tpos) in enumerate(zip(terminal_points, term_pos)):   
+        tpos_tup = tuple(tpos)
+        
+        # get neigbors of t
+        t_neighbors = list(G.neighbors(t))
+        if len(t_neighbors) > 1:
+            print("node ", t, "should be terminal, returning")
+            return
+        else:
+            t_neigh = t_neighbors[0]
+            t_neigh_pos = np.array([node[t_neigh]['x_pix'], node[t_neigh]['y_pix']])
+            # t_neigh_pos = node[t_neigh]['o'].astype(np.int32)
+            t_neigh_pos_tup = tuple(t_neigh_pos)
+        
+        if super_verbose:
+            print(i, t, "tpos:", tpos)
+            print("  neighbor:", t_neigh)
+            print("  neighbor pos:", t_neigh_pos)
+                        
+        # # get nearest points, sorted by closest        
+        dists, idxs = kdtree_nodes.query(tpos, k=n_neighbors,
+                                    distance_upper_bound=dist1)
+        # filter out bad distances
+        idxs = idxs[(dists > 0) & (dists < dist1)]
+        dists = dists[(dists > 0) & (dists < dist1)]
+        positions = kdtree_nodes.data[idxs]
+        # nodes_kd = [all_points[itmp] for itmp in idxs]
+        
+        # query ball point doesn't sort by distance...
+        # idxs = kdtree_nodes.query_ball_point(tpos, r=dist1)
+        # positions = kdtree_all.data[idxs]
+        # dists = idxs
+            
+        if len(idxs) == 0:
+            continue
+        
+        if super_verbose:
+            # print("  idxs_raw, dists:", idxs, dists)
+            # print("  idxs_raw, nodes_kd, dists:", idxs, nodes_kd, dists)
+            # print("  idxs, positions, dists:", idxs, positions, dists)
+            print("  positions[0], positions[-1]:", positions[0], positions[-1])
+            
+        # iterate through nearest points
+        for dist_tmp, pos_tmp in zip(dists, positions):
+            #if super_verbose:
+            #    print("    pos_tmp", pos_tmp)
+            
+           # skip if pos_tmp is self
+            if tuple(pos_tmp)  == tpos_tup:
+                if super_verbose:
+                    "    self", pos_tmp, "skipping"
+                continue
+            
+             # skip if pos_tmp is neighbor (that connection already exists)
+            if tuple(pos_tmp)  == t_neigh_pos_tup:
+                if super_verbose:
+                    "     neighor", t_neigh_pos_tup, "skipping"
+                continue
+            
+            # check if the pair already exists
+            if ((tpos_tup, tuple(pos_tmp)) in seen_coords) or \
+                ((tuple(pos_tmp), tpos_tup) in seen_coords):
+                if super_verbose:
+                    print("    already seen edge:, skipping:")
+                continue
+                
+            # check angle between t and neighbor, and direction of pos_tmp
+            angle = get_angle(t_neigh_pos - tpos, np.array((0, 0)), tpos - pos_tmp)
+            # angle = get_angle(l1[1] - l1[0], np.array((0, 0)), l1[1] - e_pos)
+            #if super_verbose:
+            #    print("   angle:", angle)            
+            # if (-1*angle1 < angle < angle1) or (angle < -1*angle2) or (angle > angle2):
+            if (-1*angle1 < angle < angle1):
+                out_tup = (tpos_tup, tuple(pos_tmp))
+                good_pairs.append(out_tup)
+                seen_coords.add( out_tup ) 
+                if super_verbose:
+                    print("   angle:", angle)            
+                    print("   added coord:", out_tup)
+                break
+                
+    if verbose: 
+        print("  good_pairs:", good_pairs)
+    
+    wkt = []
+    for s, e in good_pairs:
+        s_d, e_d = np.array(s), np.array(e)
+        dist = np.linalg.norm(s_d - e_d)
+        line_strings = ["{1:.1f} {0:.1f}".format(*c.tolist()) for c in [s_d, e_d]]
+        line = '(' + ", ".join(line_strings) + ')'
+        wkt.append(linestring.format(line))
+        if super_verbose:
+            print("    s_d, e_d", s_d, e_d)
+            print("    type s_d", type(s_d))
+            # print("    s_d - e_d", s_d - e_d)
+            # print("    dist:", dist)
+            print("    linestring:", line_strings)
+
+    return wkt, good_pairs
+
+
+###############################################################################
+def process_intersections(img_full, intersection_band,
+                          erosion_size=4,
+                          kernel_blur=17,
+                          thresh=0.4, 
+                          min_background_frac=0.2):
+    '''Retrieve intersection centroid locations and a smoothed array of
+    centroids. fit centroids of points.  Very slow.
+    blur with a gaussian kernel of 'kernel_blur'
+    set background to the fraction of min_background_frac compared to the max
+
+    '''
+
+    intersect_arr = img_full[intersection_band, :, :]
+
+    selem = disk(erosion_size)
+
+    inter_erode = erosion(intersect_arr, selem)
+    intersect_blur = cv2.GaussianBlur(inter_erode, (kernel_blur, kernel_blur), 0)
+    # normalize
+    intersect_blur = intersect_blur / np.max(intersect_blur)
+    intersect_threshed = cv2.threshold(intersect_blur, thresh, 1, cv2.THRESH_BINARY)[1]
+    intersect_f = 0.2 + intersect_threshed
+    intersect_f = cv2.GaussianBlur(intersect_f, (kernel_blur, kernel_blur), 0)
+
+    return [], intersect_f
+
+
+###############################################################################
+def process_intersections_blobs(img_full, intersection_band,
+                          max_sigma=15, blob_thresh=0.1,
+                          kernel_blur=27,
+                          min_background_frac=0.2,
+                          verbose=False):
+    '''Retrieve intersection centroid locations and a smoothed array of
+    centroids. fit centroids of points.  Very slow.
+    blur with a gaussian kernel of 'kernel_blur'
+        if kernel_blur < 0, skip the array creation
+    set array background to the fraction of min_background_frac compared
+        to the max
+    '''
+
+    intersect_arr = img_full[intersection_band, :, :]
+    if verbose:
+        print("process_intersections_blobs() - intersect_arr.shape:",
+          intersect_arr.shape)
+
+    t2 = time.time()
+    blobs_dog = blob_dog(intersect_arr, max_sigma=max_sigma,
+                         threshold=blob_thresh)
+    if verbose:
+        print("time to compute dog:", time.time() - t2, "n blobs:", len(blobs_dog))
+
+    if len(blobs_dog) == 0:
+        return [], None
+    coords = blobs_dog
+
+    # rescale radii?
+    # blobs_dog[:, 2] = blobs_dog[:, 2] * np.sqrt(2)
+
+    # blobs_mean_extent = int(np.rint(np.mean(blobs_dog[:,2])))
+    # print("blobs doh mean extent", blobs_mean_extent)
+
+    # make array from blob_dog
+    if kernel_blur > 0:
+        blob_arr = np.zeros(intersect_arr.shape)
+        for b in blobs_dog:
+            x, y, r = b
+            # print(x)
+            blob_arr[int(x), int(y)] = 1
+    
+        # blur
+        blob_blur = cv2.GaussianBlur(blob_arr, (kernel_blur, kernel_blur), 0)
+        # we don't want it to be zero in background
+        blob_blur += min_background_frac * np.max(blob_blur)
+        # normalize
+        blob_blur *= 1. / np.max(blob_blur)
+    
+        # blob_blur_dist = ndi.distance_transform_edt(blob_blur)
+    
+        weight_arr = blob_blur
+        
+    else:
+        weight_arr = None
+    
+    if verbose:
+        print("img_full.shape", img_full.shape)
+        print("weight_arr.shape", weight_arr.shape)
+
+    return coords, weight_arr
+
+
+###############################################################################
+def accretion_disk(ske, sing_coords, event_horizon=20, verbose=False):
+    '''
+    Improve skeleton by defining accretion around the singularity
+    Requires skimage >= 0.17
+    event horizon is the minimum of the initial event horizon and:
+         1 pixel less than half the dist to nearest pix
+
+    Sometimes we'll miss a horizon crossing of the disk and lines,
+    since diagonal crossings might miss pixels.
+    To deal with this, just move the circle one pixel laterally, and check
+    again.  If we do this, must make sure
+    not to remove a crossing point that may also be inside the original circle.
+
+    So process is:
+      1. Look for crossing of lines and disk, record crossings
+      2. Jitter the disk one pixel down, record any crossings
+          (remove adjacent crossings)
+      3. Set points inside disk to 0
+      4. Get closest singularity to each crossing
+      5. Draw line from each crossing point to appropriate singularity
+    '''
+
+    t0 = time.time()
+    if len(sing_coords) == 0:
+        return ske, []
+    
+    h, w = ske.shape[:2]
+    # define output skeleton
+    ske_f = ske.copy()
+
+    sing_coords = sing_coords[:, :2].astype(int)
+    if verbose:
+        print("len sing_coords:", len(sing_coords))
+        print("sing_coords[:3]:\n", sing_coords[:3])
+
+    # render sing coords to kdtree
+    kd_sing = scipy.spatial.KDTree(sing_coords)
+
+    cross_coords = []
+    for i, (row_sing, col_sing) in enumerate(sing_coords):
+        # get nearest intersection
+        if len(sing_coords) > 1:
+            ds, inds = kd_sing.query([row_sing, col_sing], k=2)  #, distance_upper_bound=event_horizon)
+            # filter bad dists of 0 (self) or infinite
+            filter_kd = np.where(np.logical_and(ds > 0, np.isfinite(ds)))
+            nearest_point = kd_sing.data[inds[filter_kd]][0]
+            nearest_dist = ds[filter_kd][0]
+        else:
+            nearest_dist = 10000000.
+
+        # event horizon is the minimum of event horizon and 1 pixels less than
+        #  half the dist to nearest pix
+        event_horizon_f = min(event_horizon, int(0.5 * nearest_dist) - 1)
+
+        if verbose:
+            print("nearest_point", nearest_point)
+            print("nearest_dist", nearest_dist)
+            print("event_horizon_f", event_horizon_f) 
+
+        # accretion disk
+        rr00, cc00 = skimage.draw.circle_perimeter(row_sing, col_sing, radius=event_horizon_f)
+        # filter out values that exceed the patch size, or are < 0
+        filter0 = np.where(np.logical_and(0 <= rr00, rr00 < h))
+        rr01 = rr00[filter0]
+        cc01 = cc00[filter0]
+        filter1 = np.where(np.logical_and(0 <= cc01, cc01 < w))
+        rr = rr01[filter1]
+        cc = cc01[filter1]
+
+        # find horizon crossings with rr,cc
+        ske_tmp = ske.copy()
+        ske_tmp[rr, cc] += 2
+        spags = np.array(np.where(ske_tmp == 3)).T
+        if verbose:
+            print("rr, cc:", rr, cc)
+            print("spags:\n", spags)
+
+        # now clear out disk
+        rr00, cc00 = skimage.draw.disk((row_sing, col_sing), event_horizon_f)
+        filter0 = np.where(np.logical_and(0 <= rr00, rr00 < h))
+        rr01 = rr00[filter0]
+        cc01 = cc00[filter0]
+        filter1 = np.where(np.logical_and(0 <= cc01, cc01 < w))
+        rrd = rr01[filter1]
+        ccd = cc01[filter1]
+        # set patch empty
+        ske_f[rrd, ccd] = 0
+
+        # get all neighbors of spags, set as a bad idx spags are adjacent
+        neighs_all = set()
+        bad_idxs = []
+        for i, (rtmp, ctmp) in enumerate(spags):
+            # first check that the intersection isn't an orphan in ske_f
+            xr0, xr1 = max(rtmp-1, 0), rtmp+2
+            xc0, xc1 = max(ctmp-1, 0), ctmp+2
+            if np.sum(ske_f[xr0:xr1, xc0:xc1]) < 1:
+                bad_idxs.append(i)
+                if verbose:
+                    print("orphan crossing, skipping:", rtmp, ctmp)
+                # print("xr0, xr1, xc0, xc1 ", xr0, xr1 ,xc0, xc1)
+                # print("ske_f[xr0:xr1, xc0:xc1]:", ske_f[xr0:xr1, xc0:xc1])
+                continue
+            if (rtmp, ctmp) in neighs_all:
+                if verbose:
+                    print("  ", rtmp, ctmp, "neighbor to existing point, skipping")
+                bad_idxs.append(i)
+                continue
+            # include orignal points
+            neighs_all = neighs_all.union(set([(rtmp, ctmp)]))
+            # neigbors
+            neighs_all = neighs_all.union(set(neighbors(rtmp, ctmp, h-1, w-1, dl=2)))
+        # remove bad idxs
+        spags = [i for j, i in enumerate(spags) if j not in bad_idxs]    
+        
+        # search about the circle for missed points
+        to_append = []
+        for itmp, (rtmp, ctmp) in enumerate(zip(rr, cc)):
+            # get immediate neighbors
+            neighs_tmp = set(neighbors(rtmp, ctmp, h-1, w-1, dl=1))
+            # check if any overlap with neighs_all, if so skip
+            if len(neighs_all.intersection(set(neighs_tmp))) > 0:
+                continue
+            # check if any point on the circle has a neighbor that is nonzero
+            #  if so, add to spags
+            neigh_sum = np.sum([ske_f[z] for z in list(neighs_tmp)])
+            if neigh_sum > 0:
+                if verbose:
+                    print(rtmp, ctmp, "neigh_sum:", neigh_sum)
+                # add to spags
+                to_append.append([rtmp, ctmp])
+                # add to neighs_all
+                # original point
+                neighs_all = neighs_all.union(set([(rtmp, ctmp)]))
+                # neigbors
+                neighs_all = neighs_all.union(set(neighbors(rtmp, ctmp, h-1, w-1, dl=2)))
+
+        if len(spags) == 0:
+            spags_tot = to_append
+        elif len(to_append) > 0:
+            spags_tot = np.append(spags, to_append, axis=0)
+        else:
+            spags_tot = spags
+
+        if verbose:
+            print("spags:", spags)
+            print("neighs_all:", neighs_all)
+            print("to_append:", to_append)
+            print("spags_tot:", spags_tot)
+        
+        if len(spags_tot) > 0:
+            cross_coords.extend(spags_tot)
+
+    # connect to nearest point
+    for i, cross_coord in enumerate(cross_coords):
+        if verbose:
+            print(i, cross_coord)
+        xr, xc = cross_coord
+        # first check that the intersection isn't an orphan in ske_f
+        xr0, xr1 = max(xr-1, 0), xr+2
+        xc0, xc1 = max(xc-1, 0), xc+2
+        if np.sum(ske_f[xr0:xr1, xc0:xc1]) < 1:
+            print("Orphan crossing!", cross_coord)
+            print("xr0, xr1, xc0, xc1 ", xr0, xr1 ,xc0, xc1)
+            print("ske_f[xr0:xr1, xc0:xc1]:", ske_f[xr0:xr1, xc0:xc1])
+            # continue
+            return
+        # get nearest intersection
+        ds, inds = kd_sing.query(cross_coord, k=2, 
+                                 distance_upper_bound=event_horizon + 2)
+        # filter bad dists of 0 (self) or infinite
+        filter_kd = np.where(np.logical_and(ds > 0, np.isfinite(ds)))
+        nearest_point = kd_sing.data[inds[filter_kd]][0]
+        nearest_dist = ds[filter_kd][0]
+
+        rr_tmp, cc_tmp = skimage.draw.line(nearest_point[0], nearest_point[1], xr, xc)
+        ske_f[rr_tmp, cc_tmp] = 1
+
+    tf = time.time()
+    if verbose:
+        print("Time to run accrection_disk():", tf-t0, "seconds")
+    return ske_f, np.array(cross_coords)
+
+
+###############################################################################
+def accretion_disk_v0(ske, blobs_dog, event_horizon=20, verbose=False):
+    '''
+    Improve skeleton by defining accretion around the singularity
+    Requires skimage >= 0.17
+    event horizon is the minimum of the initial event horizon and:
+         1 pixel less than half the dist to nearest pix
+
+    Sometimes we'll miss a horizon crossing of the disk and lines,
+    since diagonal crossings might miss pixels.
+    To deal with this, just move the circle one pixel laterally, and check
+    again.  If we do this, must make sure
+    not to remove a crossing point that may also be inside the original circle.
+
+    So process is:
+      1. Look for crossing of lines and disk, record crossings
+      2. Jitter the disk one pixel down, record any crossings
+          (remove adjacent crossings)
+      3. Set points inside disk to 0
+      4. Get closest singularity to each crossing
+      5. Draw line from each crossing point to appropriate singularity
+    '''
+
+    t0 = time.time()
+    
+    if len(blobs_dog) == 0:
+        return ske
+
+    h, w = ske.shape[:2]
+    # define output skeleton
+    ske_f = ske.copy()
+
+    sing_coords = blobs_dog[:, :2].astype(int)
+    if verbose:
+        print("len sing_coords:", len(sing_coords))
+        print("sing_coords[:3]:\n", sing_coords[:3])
+
+    # render sing coords to kdtree
+    kd_sing = scipy.spatial.KDTree(sing_coords)
+
+    cross_coords = []
+    for i, (row_sing, col_sing) in enumerate(sing_coords):
+        # get nearest intersection
+        if len(sing_coords) > 1:
+            ds, inds = kd_sing.query([row_sing, col_sing], k=2)  #, distance_upper_bound=event_horizon)
+            # filter bad dists of 0 (self) or infinite
+            filter_kd = np.where(np.logical_and(ds > 0, np.isfinite(ds)))
+            nearest_point = kd_sing.data[inds[filter_kd]][0]
+            nearest_dist = ds[filter_kd][0]
+        else:
+            nearest_dist = 10000000.
+
+        # event horizon is the minimum of event horizon and 1 pixel less than
+        #  half the dist to nearest pix
+        event_horizon_f = min(event_horizon, int(0.5 * nearest_dist) - 1)
+
+        if verbose:
+            print("nearest_point", nearest_point)
+            print("nearest_dist", nearest_dist)
+            print("event_horizon_f", event_horizon_f)
+
+        # accretion disk
+        rr00, cc00 = skimage.draw.circle_perimeter(row_sing, col_sing,
+                                                   radius=event_horizon_f)
+        # filter out values that exceed the patch size, or are < 0
+        filter0 = np.where(np.logical_and(0 <= rr00, rr00 < h))
+        rr01 = rr00[filter0]
+        cc01 = cc00[filter0]
+        filter1 = np.where(np.logical_and(0 <= cc01, cc01 < w))
+        rr = rr01[filter1]
+        cc = cc01[filter1]
+
+        # find horizon crossings with rr,cc
+        ske_tmp = ske.copy()
+        ske_tmp[rr, cc] += 2
+        spags = np.array(np.where(ske_tmp == 3)).T
+        if verbose:
+            print("rr, cc:", rr, cc)
+            print("spags:\n", spags)
+
+        # get all neighbors of spags, set as a bad idx spags are adjacent
+        neighs_all = set()
+        bad_idxs = []
+        for i, (x, y) in enumerate(spags):
+            if (x, y) in neighs_all:
+                print("  ", x, y, "neighbor to existing point, skipping")
+                bad_idxs.append(i)
+                continue
+            # include orignal points
+            neighs_all = neighs_all.union(set([(x, y)]))
+            # neigbors
+            neighs_all = neighs_all.union(set(neighbors(x, y, w, h, dl=1)))
+        # remove bad idxs
+        spags = [i for j, i in enumerate(spags) if j not in bad_idxs]
+
+        # jitter, then recalculate accrection disk
+        # cirle about point
+        rr00, cc00 = skimage.draw.circle_perimeter(row_sing + 1, col_sing,
+                                                   radius=event_horizon_f)
+        # filter out values that exceed the patch size, or are < 0
+        filter0 = np.where(np.logical_and(0 <= rr00, rr00 < h))
+        rr01 = rr00[filter0]
+        cc01 = cc00[filter0]
+        filter1 = np.where(np.logical_and(0 <= cc01, cc01 < w))
+        rr2 = rr01[filter1]
+        cc2 = cc01[filter1]
+
+        # find crossings with rr2,cc2
+        ske_tmp = ske.copy()
+        ske_tmp[rr2, cc2] += 2
+        spags2 = np.array(np.where(ske_tmp == 3)).T
+        bad_idxs = []
+        for i, (x, y) in enumerate(spags2):
+            # print(set([(x,y)]))
+            if (x, y) in neighs_all:
+                if verbose:
+                    print(x, y, "neighbor to existing point, skipping")
+                bad_idxs.append(i)
+                continue
+            # include orignal points
+            neighs_all = neighs_all.union(set([(x, y)]))
+            # neigbors
+            neighs_all = neighs_all.union(set(neighbors(x, y, w, h, dl=1)))
+        # remove bad idxs
+        spags2 = [i for j, i in enumerate(spags2) if j not in bad_idxs]
+        spags2_set = set([(z[0], z[1]) for z in spags2])
+
+        # now check if the new spags have a neighbor in spags
+        # if so, ignore it so we don't
+        to_append = []
+        for p in spags2_set:
+            if p not in neighs_all:
+                to_append.append(list(p))
+        if len(to_append) > 0:
+            spags_tot = np.append(spags, to_append, axis=0)
+        else:
+            spags_tot = spags
+
+        spags_tot = np.array(spags_tot)
+        if verbose:
+            print("spags2_set:", spags2_set)
+            print("spags+tot:\n", spags_tot)
+
+        # add the crossings to cross_coords
+        cross_coords.extend(spags_tot)
+
+        # now clear out disk
+        rr00, cc00 = skimage.draw.disk((row_sing, col_sing), event_horizon_f)
+        filter0 = np.where(np.logical_and(0 <= rr00, rr00 < h))
+        rr01 = rr00[filter0]
+        cc01 = cc00[filter0]
+        filter1 = np.where(np.logical_and(0 <= cc01, cc01 < w))
+        rrd = rr01[filter1]
+        ccd = cc01[filter1]
+        # set patch empty
+        ske_f[rrd, ccd] = 0
+
+    # now connect crossing coords to the nearest singularity
+    for i, cross_coord in enumerate(np.array(cross_coords)):
+        if verbose:
+            print(i, cross_coord)
+        xr, xc = cross_coord
+        # first check that the intersection isn't an orphan in ske_f
+        xr0, xr1 = max(xr-1, 0), xr+2
+        xc0, xc1 = max(xc-1, 0), xc+2
+        if np.sum(ske_f[xr0:xr1, xc0:xc1]) < 1:
+            if verbose:
+                print("orphan crossing, skipping:", cross_coord)
+            continue
+        # get nearest intersection
+        ds, inds = kd_sing.query(cross_coord, k=2,
+                                 distance_upper_bound=event_horizon+2)
+        # filter bad dists of 0 (self) or infinite
+        filter_kd = np.where(np.logical_and(ds > 0, np.isfinite(ds)))
+        nearest_point = kd_sing.data[inds[filter_kd]][0]
+        nearest_dist = ds[filter_kd][0]
+
+        rr_tmp, cc_tmp = skimage.draw.line(nearest_point[0],
+                                           nearest_point[1],
+                                           xr, xc)
+        ske_f[rr_tmp, cc_tmp] = 1
+
+    tf = time.time()
+    print("Time to run accrection_disk():", tf-t0, "seconds")
+    return ske_f
+
+
 ###############################################################################
 def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
                   clip=2, img_shape=(1300, 1300), img_mult=255, hole_size=300,
@@ -584,8 +1551,14 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
                   max_out_size=(200000, 200000),
                   num_classes=1,
                   skeleton_band='all',
+                  # intersection vals
+                  intersection_band=-1,
+                  # max_sigma=15, blob_thresh=0.1,
+                  intersection_thresh=0.4,
+                  intersection_erosion_size=4,
                   kernel_blur=27,
                   min_background_frac=0.2,
+                  event_horizon=20,
                   verbose=False
                   ):
     '''
@@ -600,8 +1573,6 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
     #replicate = 5
     #clip = 2
     rec = replicate + clip
-    weight_arr = None
-
 
     # read in data
     if num_classes == 1:
@@ -632,6 +1603,29 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
         print("make_skeleton(), img dtype:", img.dtype)
         #print("make_skeleton(), img unique:", np.unique(img))
 
+    # intersections
+    if intersection_band >= 0:  # and use_medial_axis:
+#        _, weight_arr = process_intersections(img_full, intersection_band,
+#                          erosion_size=intersection_erosion_size,
+#                          kernel_blur=kernel_blur,
+#                          thresh=intersection_thresh, 
+#                          min_background_frac=min_background_frac)
+        intersect_coords, weight_arr = process_intersections_blobs(
+            img_full, intersection_band,
+            # max_sigma=max_sigma, blob_thresh=blob_thresh,
+            kernel_blur=kernel_blur,
+            min_background_frac=min_background_frac)
+
+        if weight_arr is not None:
+            if verbose:
+                print("make_skeleton(), weight_arr.shape", weight_arr.shape)
+        else:
+            if verbose:
+                print("make_skeleton(), weight_arr", weight_arr)
+                  
+    else:
+        weight_arr = None
+
     ##########
     # potentially keep only subset of data 
     shape0 = img.shape
@@ -646,7 +1640,12 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
     
     if fix_borders:
         img = cv2.copyMakeBorder(img, replicate, replicate, replicate, 
-                                 replicate, cv2.BORDER_REPLICATE)        
+                                 replicate, cv2.BORDER_REPLICATE)
+        if intersection_band >= 0 and weight_arr is not None:
+            weight_arr = cv2.copyMakeBorder(weight_arr,
+                                            replicate, replicate, replicate,
+                                            replicate, cv2.BORDER_REPLICATE)
+        
     img_copy = None
     if debug:
         if fix_borders:
@@ -680,10 +1679,14 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
     else:
         if verbose:
             print("running updated skimage.medial_axis...")
-        ske = skimage.morphology.medial_axis(img).astype(np.uint16)
+        ske = medial_axis_weight.medial_axis_weight(
+                img, weight_arr=weight_arr,
+                return_distance=False).astype(np.uint16)
+        # ske = skimage.morphology.medial_axis(img).astype(np.uint16)
         t3 = time.time()
         if verbose:
-            print("Time to run skimage.medial_axis():", t3-t2, "seconds")
+            print("Time to run medial_axis_weight():", t3-t2, "seconds")
+        # print("Time to run skimage.medial_axis():", t3-t2, "seconds")
 
     if fix_borders:
         if verbose:
@@ -696,6 +1699,18 @@ def make_skeleton(img_loc, thresh, debug, fix_borders, replicate=5,
         if verbose:
             print("Time fix borders:", t4-t3, "seconds")
     
+    if event_horizon > 0:
+        if len(intersect_coords) > 0:
+            h, w = ske.shape[:2]
+            sing_coords = intersect_coords[:, :2].astype(int)
+            # clip to 1 pixel from edge
+            sing_coords[:, 0] = np.clip(sing_coords[:, 0], 1, h-1)
+            sing_coords[:, 1] = np.clip(sing_coords[:, 1], 1, w-1)
+            # print("sing_coords:", sing_coords)
+            ske, cross_coords = accretion_disk(ske, sing_coords,
+                                               event_horizon=event_horizon,
+                                               verbose=verbose)
+
     t1 = time.time()
     if verbose:
         print("ske.shape:", ske.shape)
@@ -725,8 +1740,12 @@ def img_to_ske_G(params):
                 use_medial_axis,\
                 num_classes,\
                 skeleton_band, \
+                intersection_band,\
+                intersection_thresh,\
+                intersection_erosion_size,\
                 kernel_blur,\
                 min_background_frac,\
+                event_horizon,\
                 verbose\
         = params
 
@@ -741,9 +1760,13 @@ def img_to_ske_G(params):
                       skeleton_band=skeleton_band,
                       num_classes=num_classes,
                       use_medial_axis=use_medial_axis,
+                      intersection_band=intersection_band,
+                      # max_sigma=max_sigma, blob_thresh=blob_thresh,
+                      intersection_thresh=intersection_thresh,
+                      intersection_erosion_size=intersection_erosion_size,
                       kernel_blur=kernel_blur,
                       min_background_frac=min_background_frac,
-                      verbose=verbose)
+                      event_horizon=event_horizon)
 
     # print("img_loc:", img_loc)
 
@@ -934,6 +1957,25 @@ def G_to_wkt(G, add_small=True, connect_crossroads=True,
         print("small_segs", small_segs)
         wkt.extend(small_segs)
 
+    if connect_crossroads and len(terminal_points) > 1:
+        # v0, this version only looks at intersections
+        cross_segs, good_pairs = terminal_points_to_crossroads(
+            G, terminal_points, seen_coords=good_coords,
+            verbose=verbose, super_verbose=super_verbose)
+        # # this version looks at any point on the graph where an edge turns,
+        # #  or intersects another edge, faulty
+        # cross_segs, good_pairs = terminal_points_to_crossroads_midline(
+        #     wkt, verbose=verbose, super_verbose=super_verbose)
+        if verbose:
+            print("connect_crossroads() output:", cross_segs)
+        # make sure not to add an edge tahat add_small_segments() found
+        # print("small_segs", small_segs)
+        for edge_tmp in cross_segs:
+            if edge_tmp not in small_segs:
+                print("appending:", edge_tmp)
+                wkt.append(edge_tmp)
+        #wkt.extend(terminal_points_to_crossroads(G, terminal_points, terminal_lines))
+
     if debug:
         vertices = flatten(vertices)
         visualize(img_copy, G, vertices)
@@ -945,13 +1987,13 @@ def G_to_wkt(G, add_small=True, connect_crossroads=True,
     return wkt
 
 
-
 ###############################################################################
 def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3,
                   # threshes={'2': .3, '3': .3, '4': .3, '5': .2},
                   im_prefix='',
                   debug=False, 
                   add_small=True, 
+                  connect_crossroads=True,
                   fix_borders=True,
                   img_shape=(1300, 1300),
                   skel_replicate=5, skel_clip=2,
@@ -964,8 +2006,13 @@ def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3,
                   max_out_size=(100000, 100000),
                   use_medial_axis=True,
                   skeleton_band='all',
+                  intersection_band=-1,
+                  # max_sigma=15, blob_thresh=0.1, 
+                  intersection_thresh=0.4,
+                  intersection_erosion_size=4,
                   kernel_blur=27,
                   min_background_frac=0.2,
+                  event_horizon=20,
                   n_threads=12,
                   verbose=False,
                   super_verbose=False):
@@ -1019,8 +2066,12 @@ def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3,
                 use_medial_axis,\
                 num_classes,\
                 skeleton_band, \
+                intersection_band,\
+                intersection_thresh,\
+                intersection_erosion_size,\
                 kernel_blur,\
                 min_background_frac,\
+                event_horizon,\
                 verbose)
         params.append(param_row)
 
@@ -1046,6 +2097,7 @@ def build_wkt_dir(indir, outfile, out_ske_dir, out_gdir='', thresh=0.3,
 
         G = nx.read_gpickle(gpath)
         wkt_list = G_to_wkt(G, add_small=add_small, 
+                            connect_crossroads=connect_crossroads, 
                             verbose=verbose, super_verbose=super_verbose)
 
         # add to all_data
@@ -1067,6 +2119,7 @@ def main():
 
     global logger1
     add_small=True
+    connect_crossroads=True
     verbose = True
     super_verbose = False
     spacenet_naming_convention = False  # True
@@ -1079,8 +2132,15 @@ def main():
     hole_size=300
     cv2_kernel_close=7
     cv2_kernel_open=7
+    # intersection variables
+    # max_sigma=15
+    # blob_thresh=0.1
+    intersection_thresh=0.4
+    intersection_erosion_size=4
     kernel_blur=-1  # 25
     min_background_frac=-1  # 0.2
+    event_horizon = -1 # -1 18
+    # use_medial_axis=True   # read in from config file
     max_out_size=(2000000, 2000000)
     n_threads = 12
     im_prefix = ''
@@ -1132,17 +2192,13 @@ def main():
         os.makedirs(out_gdir, exist_ok=True)
     else:
         out_gdir = ''
-         
+     
     print("im_dir:", im_dir)
     print("out_ske_dir:", out_ske_dir)
     print("out_gdir:", out_gdir)
         
     thresh = config.skeleton_thresh
-#    # thresholds for each aoi
-#    threshes={'2': .3, '3': .3, '4': .3, '5': .2}  
-#    thresh = threshes[config.aoi]
     min_subgraph_length_pix = config.min_subgraph_length_pix
-    #min_subgraph_length_pix=200
 
     log_file = os.path.join(res_root_dir, 'skeleton.log')
     console, logger1 = make_logger.make_logger(log_file, logger_name='log',
@@ -1153,6 +2209,7 @@ def main():
     df = build_wkt_dir(im_dir, outfile_csv, out_ske_dir, out_gdir, thresh, 
                 debug=debug, 
                 add_small=add_small, 
+                connect_crossroads=connect_crossroads,
                 fix_borders=fix_borders,
                 img_shape=img_shape,
                 skel_replicate=skel_replicate, skel_clip=skel_clip,
@@ -1166,8 +2223,13 @@ def main():
                 im_prefix=im_prefix,
                 spacenet_naming_convention=spacenet_naming_convention,
                 use_medial_axis=use_medial_axis,
+                intersection_band=config.intersection_band,
+                # max_sigma=max_sigma, blob_thresh=blob_thresh,
+                intersection_thresh=intersection_thresh,
+                intersection_erosion_size=intersection_erosion_size,
                 kernel_blur=kernel_blur,
                 min_background_frac=min_background_frac,
+                event_horizon=event_horizon,
                 n_threads=n_threads,
                 verbose=verbose,
                 super_verbose=super_verbose
