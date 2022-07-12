@@ -60,9 +60,12 @@ class FullImageEvaluator(Evaluator):
                 print ("mask.shape:", mask.shape)
                 print ("prediction.shape:", prediction.shape)
                 print ("outfile_sk:", outfile_sk)
-            skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8), 
+            try:
+                skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8), 
                               compress=1)
-            
+            except:
+                skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8))
+                
             # also save with gdal?
             if save_im_gdal_format:
                 save_dir_gdal = os.path.join(self.save_dir + '_gdal')
@@ -145,8 +148,11 @@ class CropEvaluator(Evaluator):
                 print ("mask.shape:", mask.shape)
                 print ("prediction.shape:", prediction.shape)
                 print ("outfile_sk:", outfile_sk)
-            skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8), 
+            try:
+                skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8), 
                               compress=1)
+            except:
+                skimage.io.imsave(outfile_sk, (mask * 255).astype(np.uint8))
             
             # also save with gdal?
             if save_im_gdal_format:
