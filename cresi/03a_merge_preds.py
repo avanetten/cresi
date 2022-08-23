@@ -109,8 +109,11 @@ def merge_tiffs(root, out_dir, out_dir_gdal=None, num_classes=1,
                 prob_arr_mean_skimage = np.moveaxis(prob_arr_mean, -1, 0)
             else:
                 prob_arr_mean_skimage = prob_arr_mean
-            skimage.io.imsave(res_path_geo, prob_arr_mean_skimage, compress=1)
-            
+            try:
+                skimage.io.imsave(res_path_geo, prob_arr_mean_skimage, compress=1)
+            except:
+                skimage.io.imsave(res_path_geo, prob_arr_mean_skimage)
+                
             # save gdal too?
             if out_dir_gdal:
                 outpath_gdal = os.path.join(out_dir_gdal, prob_file)

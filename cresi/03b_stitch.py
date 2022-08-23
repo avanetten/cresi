@@ -256,15 +256,24 @@ def main():
             mask_norm = np.moveaxis(mask_norm, -1, 0).astype(np.uint8)
             print("mask_norm.shape:", mask_norm.shape)
             print("mask_norm.dtype:", mask_norm.dtype)
-            skimage.io.imsave(out_file_mask_norm, mask_norm,
+            try:
+                skimage.io.imsave(out_file_mask_norm, mask_norm,
                               check_contrast=False,
                               compress=skimage_compress)
+            except:
+                skimage.io.imsave(out_file_mask_norm, mask_norm,
+                              check_contrast=False,
+                              quality=50)                
             del mask_norm
             if save_overlay_and_raw:    
                 mask_raw = np.moveaxis(mask_raw, -1, 0).astype(np.uint8)
-                skimage.io.imsave(out_file_mask_raw, mask_raw,
+                try:
+                    skimage.io.imsave(out_file_mask_raw, mask_raw,
                                   check_contrast=False,
                                   compress=skimage_compress)
+                except:
+                    skimage.io.imsave(out_file_mask_raw, mask_raw,
+                                  check_contrast=False)
             del mask_raw
 
         if save_overlay_and_raw:
