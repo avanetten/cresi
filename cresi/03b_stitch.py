@@ -262,8 +262,7 @@ def main():
                               compress=skimage_compress)
             except:
                 skimage.io.imsave(out_file_mask_norm, mask_norm,
-                              check_contrast=False,
-                              quality=50)                
+                              check_contrast=False)                
             del mask_norm
             if save_overlay_and_raw:    
                 mask_raw = np.moveaxis(mask_raw, -1, 0).astype(np.uint8)
