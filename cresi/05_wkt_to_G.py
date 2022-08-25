@@ -242,7 +242,8 @@ def nodes_edges_to_G(node_loc_dic, edge_dic, name='glurp'):
     G = nx.MultiDiGraph()
     # set graph crs and name
     G.graph = {'name': name,
-               'crs': {'init': 'epsg:4326'}
+               # 'crs': {'init': 'epsg:4326'}
+               'crs': 'epsg:4326'
                }
     
     # add nodes
@@ -831,6 +832,7 @@ def wkt_to_G(params):
     if verbose:
         print ("  len(G.nodes():", len(G0.nodes()))
         print ("  len(G.edges():", len(G0.edges()))
+        print ("  G0.graph['crs']", G0.graph['crs'])
     #for edge_tmp in G0.edges():
     #    print ("\n 0 wtk_to_G():", edge_tmp, G0.edge[edge_tmp[0]][edge_tmp[1]])
     
@@ -872,7 +874,6 @@ def wkt_to_G(params):
     
     #edge_tmp = G0.edges()[5]
     #print (edge_tmp, "G0.edge props:", G0.edge[edge_tmp[0]][edge_tmp[1]])
-
     
     # geo coords
     if im_file:
@@ -913,8 +914,17 @@ def wkt_to_G(params):
 
         if verbose:
             print ("projecting graph...")
-        G_projected = ox.project_graph(G1)
-    
+        try:
+            G_projected = ox.project_graph(G1)
+        except:
+            # make sure points have a geom
+            for i, (n, attr_dict) in enumerate(G1.nodes(data=True)):
+                # lon, lat = coords_dict[n]
+                node_geom = Point(attr_dict['x'], attr_dict['y'])
+                attr_dict['geometry'] = node_geom
+            print("ox.is_crs_utm(G1.graph.crs)", ox.is_crs_utm(G1.graph.crs))
+            G_projected = ox.project_graph(G1)
+            
         # get geom wkt (for printing/viewing purposes)
         for i,(u,v,attr_dict) in enumerate(G_projected.edges(data=True)):
             if 'geometry' in attr_dict.keys():
